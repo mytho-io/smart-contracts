@@ -28,14 +28,6 @@ The **MYTHO Ecosystem** is a decentralized platform on Ethereum that integrates 
 | `TotemToken.sol`         | ERC20 token for totems with sale restrictions.                              |
 | `RevenuePool.sol`        | Collects fees from creation and sales.                                      |
 
-## Installation
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v16+ recommended)
-- [Foundry](https://book.getfoundry.sh/) (Forge for testing and deployment)
-- [Git](https://git-scm.com/)
-
 ```bash
 mytho/
 ├── src/                    # Smart contracts
@@ -52,3 +44,11 @@ mytho/
 ├── foundry.toml            # Foundry configuration
 └── README.md               # This file
 ```
+
+## Installation
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (v16+ recommended)
+- [Foundry](https://book.getfoundry.sh/) (Forge for testing and deployment)
+- [Git](https://git-scm.com/)
