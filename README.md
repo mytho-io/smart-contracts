@@ -28,6 +28,8 @@ The **MYTHO Ecosystem** is a decentralized platform on Ethereum that integrates 
 | `TotemToken.sol`         | ERC20 token for totems with sale restrictions.                              |
 | `RevenuePool.sol`        | Collects fees from creation and sales.                                      |
 
+## Structure
+
 ```bash
 mytho/
 ├── src/                    # Smart contracts

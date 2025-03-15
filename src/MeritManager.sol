@@ -28,7 +28,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     uint256 public periodDuration;
     uint256 public deploymentTimestamp;
     uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
-    uint256 public mythusMultiplier; // Multiplier for merit during Mythus period (default: 150 = 1.5x)
+    uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
 
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
     mapping(uint256 period => mapping(address totemAddress => uint256 points))
@@ -71,7 +71,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error AlreadyBlacklisted(address totem);
     error AlreadyNotInBlacklist(address totem);
     error InsufficientBoostFee();
-    error NotInMythusPeriod();
+    error NotInMythumPeriod();
     error AlreadyBoostedInPeriod();
     error AccessControl();
     error NoMythoToClaim();
@@ -107,7 +107,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         ];
 
         oneTotemBoost = 10; // 10 merit points per boost
-        mythusMultiplier = 150; // 1.5x multiplier (150/100)
+        mythumMultiplier = 150; // 1.5x multiplier (150/100)
         boostFee = 0.001 ether; // 0.001 native tokens for boost fee
     }
 
@@ -140,9 +140,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         uint256 currentPeriod_ = currentPeriod();
 
-        // Apply Mythus multiplier if in Mythus period
-        if (isMythus()) {
-            _amount = (_amount * mythusMultiplier) / 100;
+        // Apply Mythum multiplier if in Mythum period
+        if (isMythum()) {
+            _amount = (_amount * mythumMultiplier) / 100;
         }
 
         // Add merit to the totem
@@ -160,7 +160,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
-        if (!isMythus()) revert NotInMythusPeriod();
+        if (!isMythum()) revert NotInMythumPeriod();
 
         uint256 currentPeriod_ = currentPeriod();
 
@@ -266,14 +266,14 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Checks if the current time is within the Mythus period
-     * @return Whether current time is in Mythus period
+     * @dev Checks if the current time is within the Mythum period
+     * @return Whether current time is in Mythum period
      */
-    function isMythus() public view returns (bool) {
+    function isMythum() public view returns (bool) {
         uint256 currentPeriodStart = deploymentTimestamp +
             (currentPeriod() * periodDuration);
-        uint256 mythusStart = currentPeriodStart + ((periodDuration * 3) / 4);
-        return block.timestamp >= mythusStart;
+        uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
+        return block.timestamp >= mythumStart;
     }
 
     /**
@@ -355,10 +355,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets the timestamp when the current Mythus period starts
-     * @return Timestamp of the current Mythus period start
+     * @dev Gets the timestamp when the current Mythum period starts
+     * @return Timestamp of the current Mythum period start
      */
-    function getCurrentMythusStart() external view returns (uint256) {
+    function getCurrentMythumStart() external view returns (uint256) {
         uint256 currentPeriodStart = deploymentTimestamp +
             (currentPeriod() * periodDuration);
         return currentPeriodStart + ((periodDuration * 3) / 4);
@@ -438,15 +438,15 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Sets the Mythus multiplier (in percentage, e.g., 150 = 1.5x)
-     * @param _mythusMultiplier New multiplier value
+     * @dev Sets the Mythum multiplier (in percentage, e.g., 150 = 1.5x)
+     * @param _mythumMultiplier New multiplier value
      */
-    function setMythusMultiplier(
-        uint256 _mythusMultiplier
+    function setMythmsMultiplier(
+        uint256 _mythumMultiplier
     ) external onlyRole(MANAGER) {
         _updateState();
-        mythusMultiplier = _mythusMultiplier;
-        emit ParameterUpdated("mythusMultiplier", _mythusMultiplier);
+        mythumMultiplier = _mythumMultiplier;
+        emit ParameterUpdated("mythumMultiplier", _mythumMultiplier);
     }
 
     /**
