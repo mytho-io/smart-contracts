@@ -9,6 +9,7 @@ import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
 import {Totem} from "./Totem.sol";
 import {TotemToken} from "./TotemToken.sol";
 import {MeritManager} from "./MeritManager.sol";
+import {AddressRegistry} from "./AddressRegistry.sol";
 
 contract TotemFactory is AccessControlUpgradeable {
     // Totem token distributor instance
@@ -16,7 +17,7 @@ contract TotemFactory is AccessControlUpgradeable {
 
     // Core contract addresses
     address private beaconAddr;
-    address private revenuePoolAddr;
+    address private treasuryAddr;
     address private meritManagerAddr;
     
     // ASTR token address
@@ -55,10 +56,8 @@ contract TotemFactory is AccessControlUpgradeable {
     error ZeroAddress();
 
     function initialize(
-        TotemTokenDistributor _totemDistributor,
+        address _registryAddr,
         address _beaconAddr,
-        address _revenuePoolAddr,
-        address _meritManagerAddr,
         address _astrTokenAddr
     ) public initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -66,12 +65,12 @@ contract TotemFactory is AccessControlUpgradeable {
 
         // Initialize fee settings
         if (_astrTokenAddr == address(0)) revert ZeroAddress();
-        if (_revenuePoolAddr == address(0)) revert ZeroAddress();
+        if (_registryAddr == address(0)) revert ZeroAddress();
 
-        totemDistributor = _totemDistributor;
+        totemDistributor = TotemTokenDistributor(AddressRegistry(_registryAddr).getTotemTokenDistributor());
+        treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
+        meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         beaconAddr = _beaconAddr;
-        revenuePoolAddr = _revenuePoolAddr;
-        meritManagerAddr = _meritManagerAddr;
         
         astrTokenAddr = _astrTokenAddr;
         creationFee = 1 ether;
@@ -86,7 +85,7 @@ contract TotemFactory is AccessControlUpgradeable {
         if (creationFee == 0) return;
         
         // Transfer tokens from sender to fee collector
-        bool success = IERC20(astrTokenAddr).transferFrom(_sender, revenuePoolAddr, creationFee);
+        bool success = IERC20(astrTokenAddr).transferFrom(_sender, treasuryAddr, creationFee);
         if (!success) revert FeeTransferFailed();
     }
 
@@ -117,7 +116,7 @@ contract TotemFactory is AccessControlUpgradeable {
                 address(totemToken),
                 _dataHash,
                 address(totemDistributor),
-                revenuePoolAddr,
+                treasuryAddr,
                 false,
                 meritManagerAddr
             )
@@ -159,7 +158,7 @@ contract TotemFactory is AccessControlUpgradeable {
                 _tokenAddr,
                 _dataHash,
                 address(totemDistributor),
-                revenuePoolAddr,
+                treasuryAddr,
                 true,
                 meritManagerAddr
             )

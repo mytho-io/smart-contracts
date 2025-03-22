@@ -12,7 +12,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * - Withdraw native tokens to specified addresses
  * - Check balances of ERC20 and native tokens
  */
-contract RevenuePool is AccessControlUpgradeable {
+contract Treasury is AccessControlUpgradeable {
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
     event ERC20Withdrawn(address indexed token, address indexed to, uint256 amount);

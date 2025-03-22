@@ -7,21 +7,19 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 
+import {AddressRegistry} from "./AddressRegistry.sol";
+
 /**
  * @title MeritManager
  * @dev Manages merit points for registered totems and distributes MYTHO tokens based on merit.
  * Includes features like totem registration, merit crediting, boosting, and claiming rewards.
  */
 contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
-    using SafeERC20 for IERC20;
-
-    // Roles
-    bytes32 public constant MANAGER = keccak256("MANAGER");
-    bytes32 public constant REGISTRATOR = keccak256("REGISTRATOR");
-    bytes32 public constant BLACKLISTED = keccak256("BLACKLISTED");
+    using SafeERC20 for IERC20;    
 
     // State variables
     address public mythoToken;
+    address public treasuryAddr;
     address[4] public vestingWallets;
     uint256[4] public vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
@@ -49,6 +47,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     // Totem state tracking
     mapping(address => bool) public registeredTotems;
 
+    // Roles
+    bytes32 public constant MANAGER = keccak256("MANAGER");
+    bytes32 public constant REGISTRATOR = keccak256("REGISTRATOR");
+    bytes32 public constant BLACKLISTED = keccak256("BLACKLISTED");
+
     // Events
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
@@ -62,7 +65,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
-    event FeeWithdrawn(address indexed to, uint256 amount);
 
     // Custom errors
     error TotemNotRegistered();
@@ -82,11 +84,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /**
      * @dev Initializes the contract with required parameters
-     * @param _mythoToken Address of the MYTHO token
+     * @param _registryAddr Address of the AddressRegistry contract
      * @param _vestingWallets Array of vesting wallet addresses
      */
     function initialize(
-        address _mythoToken,
+        address _registryAddr,
         address[4] memory _vestingWallets
     ) public initializer {
         __AccessControl_init();
@@ -95,7 +97,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
 
-        mythoToken = _mythoToken;
+        mythoToken = AddressRegistry(_registryAddr).getMythoToken();
+        treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
+
         vestingWallets = _vestingWallets;
         periodDuration = 30 days;
         deploymentTimestamp = block.timestamp;
@@ -166,6 +170,14 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         if (userBoostedInPeriod[currentPeriod_][msg.sender])
             revert AlreadyBoostedInPeriod();
+
+        if (msg.value > boostFee) {
+            // Refund excess boost fee
+            payable(msg.sender).transfer(msg.value - boostFee);
+        } else {
+            // Transfer boost fee to revenue pool
+            payable(treasuryAddr).transfer(boostFee);
+        }
 
         // Mark user as having boosted in this period
         userBoostedInPeriod[currentPeriod_][msg.sender] = true;
@@ -513,32 +525,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address _registrator
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         revokeRole(REGISTRATOR, _registrator);
-    }
-
-    /**
-     * @dev Withdraws accumulated fees from boosts
-     * @param _to Address to send the fees to
-     */
-    function withdrawFees(address _to) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_to == address(0)) revert InvalidAddress();
-
-        uint256 balance = address(this).balance;
-
-        (bool success, ) = _to.call{value: balance}("");
-        if (!success) revert TransferFailed();
-
-        emit FeeWithdrawn(_to, balance);
-    }
-
-    /**
-     * @dev Sets a new MYTHO token address
-     * @param _newMythoToken New token address
-     */
-    function setMythoToken(
-        address _newMythoToken
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_newMythoToken == address(0)) revert InvalidAddress();
-        mythoToken = _newMythoToken;
     }
 
     /**

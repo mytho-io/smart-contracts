@@ -14,7 +14,9 @@ import {TotemTokenDistributor as TTD} from "../src/TotemTokenDistributor.sol";
 import {TotemToken as TT} from "../src/TotemToken.sol";
 import {Totem} from "../src/Totem.sol";
 import {MYTHO} from "../src/MYTHO.sol";
-import {RevenuePool} from "../src/RevenuePool.sol";
+import {Treasury} from "../src/Treasury.sol";
+import {AddressRegistry} from "../src/AddressRegistry.sol";
+
 
 import {MockToken} from "./mocks/MockToken.sol";
 
@@ -33,9 +35,13 @@ contract ComplexTest is Test {
     TTD distrImpl;
     TTD distr;
 
-    TransparentUpgradeableProxy revenuePoolProxy;
-    RevenuePool revenuePoolImpl;
-    RevenuePool revenuePool;
+    TransparentUpgradeableProxy treasuryProxy;
+    Treasury treasuryImpl;
+    Treasury treasury;
+
+    TransparentUpgradeableProxy registryProxy;
+    AddressRegistry registryImpl;
+    AddressRegistry registry;
 
     MYTHO mytho;
     MockToken paymentToken;
@@ -300,6 +306,16 @@ contract ComplexTest is Test {
 
     // Deploy all contracts
     function _deploy() internal {
+        treasuryImpl = new Treasury();
+        treasuryProxy = new TransparentUpgradeableProxy(address(treasuryImpl), deployer, "");
+        treasury = Treasury(payable(address(treasuryProxy)));
+        treasury.initialize();
+
+        registryImpl = new AddressRegistry();
+        registryProxy = new TransparentUpgradeableProxy(address(registryImpl), deployer, "");
+        registry = AddressRegistry(address(registryProxy));
+        registry.initialize();
+
         Totem totemImplementation = new Totem();
         beacon = new UpgradeableBeacon(address(totemImplementation), deployer);
 
@@ -321,27 +337,29 @@ contract ComplexTest is Test {
             mytho.meritVestingYear4()
         ];
 
-        mm.initialize(address(mytho), vestingAddresses);
-
-        // Revenue Pool
-        revenuePoolImpl = new RevenuePool();
-        revenuePoolProxy = new TransparentUpgradeableProxy(address(revenuePoolImpl), deployer, "");
-        revenuePool = RevenuePool(payable(address(revenuePoolProxy)));
-        revenuePool.initialize();
+        registry.setAddress(bytes32("MERIT_MANAGER"), address(mm));
+        registry.setAddress(bytes32("MYTHO_TOKEN"), address(mytho));
+        registry.setAddress(bytes32("MYTHO_TREASURY"), address(treasury));
+        
+        mm.initialize(address(registry), vestingAddresses);        
 
         // TotemTokenDistributor
         distrImpl = new TTD();
         distrProxy = new TransparentUpgradeableProxy(address(distrImpl), deployer, "");
         distr = TTD(address(distrProxy));
-        distr.initialize(IERC20(address(mytho)), mm, address(revenuePool));
+        distr.initialize(address(registry));
+
+        registry.setAddress(bytes32("TOTEM_TOKEN_DISTRIBUTOR"), address(distr));
 
         // TotemFactory
         factoryImpl = new TF();
         factoryProxy = new TransparentUpgradeableProxy(address(factoryImpl), deployer, "");
         factory = TF(address(factoryProxy));
-        factory.initialize(distr, address(beacon), address(revenuePool), address(mm), address(astrToken));
+        factory.initialize(address(registry), address(beacon), address(astrToken));
 
-        distr.setTotemFactory(factory);
+        registry.setAddress(bytes32("TOTEM_FACTORY"), address(factory));
+
+        distr.setTotemFactory(address(registry));
         paymentToken = new MockToken();
         distr.setPaymentToken(address(paymentToken));
         paymentToken.mint(userA, 1_000_000 ether);

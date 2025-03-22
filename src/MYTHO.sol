@@ -10,11 +10,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * @notice Non-upgradeable ERC20 token with fixed supply and vesting distribution
  */
 contract MYTHO is ERC20 {
-    using SafeERC20 for ERC20;
-
-    // Custom errors
-    error ZeroAddressNotAllowed(string receiverType);
-    error OnlyOwnerCanBurn();
+    using SafeERC20 for ERC20;    
 
     // Token distribution constants
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18; // 1 billion tokens with 18 decimals
@@ -51,6 +47,10 @@ contract MYTHO is ERC20 {
     address public immutable ammVesting;
     address public immutable treasury;
     address public immutable airdrop;
+
+    // Custom errors
+    error ZeroAddressNotAllowed(string receiverType);
+    error OnlyOwnerCanBurn();
 
     /**
      * @notice Constructor to deploy the token and set up vesting schedules

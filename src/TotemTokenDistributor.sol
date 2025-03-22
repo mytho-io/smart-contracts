@@ -9,48 +9,11 @@ import {TotemFactory} from "./TotemFactory.sol";
 import {TotemToken} from "./TotemToken.sol";
 import {Totem} from "./Totem.sol";
 import {MeritManager} from "./MeritManager.sol";
+import {AddressRegistry} from "./AddressRegistry.sol";
 
-// Uniswap V2 interfaces
-interface IUniswapV2Router02 {
-    function addLiquidity(
-        address tokenA,
-        address tokenB,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountA, uint amountB, uint liquidity);
-    
-    function factory() external view returns (address);
-}
-
-interface IUniswapV2Factory {
-    function getPair(address tokenA, address tokenB) external view returns (address pair);
-    function createPair(address tokenA, address tokenB) external returns (address pair);
-}
-
-// Chainlink price feed interface
-interface AggregatorV3Interface {
-    function decimals() external view returns (uint8);
-    function description() external view returns (string memory);
-    function version() external view returns (uint256);
-    function getRoundData(uint80 _roundId) external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-}
+import {IUniswapV2Router02} from "./interfaces/IUniswapV2Router02.sol";
+import {IUniswapV2Factory} from "./interfaces/IUniswapV2Factory.sol";
+import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title TotemTokenDistributor
@@ -74,14 +37,14 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     uint256 private oneTotemPriceInUsd;
 
     // contract address for revenue in payment tokens
-    address private revenuePool;
+    address private treasuryAddr;
 
     // address of payment token
     address private paymentTokenAddr;
-    
+
     // Uniswap V2 router address
     address private uniswapV2RouterAddr;
-    
+
     // Mapping from token address to Chainlink price feed address
     mapping(address => address) private priceFeedAddresses;
 
@@ -146,18 +109,15 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     error NotAllowedInSalePeriod();
     error WrongPaymentTokenAmount(uint256 paymentTokenAmount);
     error OnlyForTotem();
+    error AlreadySet();
 
-    function initialize(
-        IERC20 _mytho,
-        MeritManager _meritManager,
-        address _revenuePool
-    ) public initializer {
+    function initialize(address _registryAddr) public initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
 
-        mytho = _mytho;
-        meritManager = _meritManager;
-        revenuePool = _revenuePool;
+        mytho = IERC20(AddressRegistry(_registryAddr).getMythoToken());
+        treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
+        meritManager = MeritManager(AddressRegistry(_registryAddr).getMeritManager());
 
         maxTokensPerAddress = 5_000_000 ether;
         oneTotemPriceInUsd = 0.00004 ether;
@@ -298,7 +258,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             _totemTokenAmount
         );
     }
-    
+
     function burnTotemTokens(
         address _totemTokenAddr,
         uint256 _totemTokenAmount
@@ -325,16 +285,14 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             .collectedPaymentTokens;
         address _paymentTokenAddr = totems[_totemTokenAddr].paymentToken;
 
-        // set payment token for Totem and close sale period
-        Totem(totems[_totemTokenAddr].totemAddr).setPaymentTokenAndEndSale(IERC20(_paymentTokenAddr));
-
         // calculate revenue share
-        uint256 revenueShare = (paymentTokenAmount * REVENUE_PAYMENT_TOKEN_SHARE) / PRECISION;
-        IERC20(_paymentTokenAddr).transfer(revenuePool, revenueShare);
+        uint256 revenueShare = (paymentTokenAmount *
+            REVENUE_PAYMENT_TOKEN_SHARE) / PRECISION;
+        IERC20(_paymentTokenAddr).transfer(treasuryAddr, revenueShare);
 
         // calculate totem creator share
-        uint256 creatorShare = (paymentTokenAmount * TOTEM_CREATOR_PAYMENT_TOKEN_SHARE) /
-            PRECISION;
+        uint256 creatorShare = (paymentTokenAmount *
+            TOTEM_CREATOR_PAYMENT_TOKEN_SHARE) / PRECISION;
         IERC20(_paymentTokenAddr).transfer(
             totems[_totemTokenAddr].creator,
             creatorShare
@@ -359,6 +317,13 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             POOL_INITIAL_SUPPLY,
             poolShare
         );
+
+        // set payment token for Totem and close sale period
+        Totem(totems[_totemTokenAddr].totemAddr).closeSalePeriod(
+            IERC20(_paymentTokenAddr),
+            IERC20(liquidityToken)
+        );
+
         IERC20(liquidityToken).transfer(
             totems[_totemTokenAddr].totemAddr,
             liquidity
@@ -380,30 +345,33 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _paymentTokenAddr,
         uint256 _totemTokenAmount,
         uint256 _paymentTokenAmount
-    )
-        internal
-        returns (uint256 liquidity, address liquidityToken)
-    {
+    ) internal returns (uint256 liquidity, address liquidityToken) {
         if (uniswapV2RouterAddr == address(0)) revert("Uniswap router not set");
-        
+
         IUniswapV2Router02 router = IUniswapV2Router02(uniswapV2RouterAddr);
-        
+
         // Get the factory address
         address factoryAddr = router.factory();
         IUniswapV2Factory factory_ = IUniswapV2Factory(factoryAddr);
-        
+
         // Get or create the pair
         liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
         if (liquidityToken == address(0)) {
-            liquidityToken = factory_.createPair(_totemTokenAddr, _paymentTokenAddr);
+            liquidityToken = factory_.createPair(
+                _totemTokenAddr,
+                _paymentTokenAddr
+            );
         }
-        
+
         // Approve tokens for the router
         IERC20(_totemTokenAddr).approve(uniswapV2RouterAddr, _totemTokenAmount);
-        IERC20(_paymentTokenAddr).approve(uniswapV2RouterAddr, _paymentTokenAmount);
-        
+        IERC20(_paymentTokenAddr).approve(
+            uniswapV2RouterAddr,
+            _paymentTokenAmount
+        );
+
         // Add liquidity
-        (,, liquidity) = router.addLiquidity(
+        (, , liquidity) = router.addLiquidity(
             _totemTokenAddr,
             _paymentTokenAddr,
             _totemTokenAmount,
@@ -413,7 +381,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             address(this), // Send LP tokens to this contract
             block.timestamp + 600 // Deadline: 10 minutes from now
         );
-        
+
         return (liquidity, liquidityToken);
     }
 
@@ -425,8 +393,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         paymentTokenAddr = _paymentTokenAddr;
     }
 
-    function setTotemFactory(TotemFactory _factory) external onlyRole(MANAGER) {
-        factory = _factory;
+    function setTotemFactory(address _registryAddr) external onlyRole(MANAGER) {
+        if (address(factory) != address(0)) revert AlreadySet();
+        factory = TotemFactory(AddressRegistry(_registryAddr).getTotemFactory());
     }
 
     function setMaxTotemTokensPerAddress(
@@ -434,21 +403,26 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     ) external onlyRole(MANAGER) {
         maxTokensPerAddress = _amount;
     }
-    
+
     /**
      * @notice Sets the Uniswap V2 router address
      * @param _routerAddr Address of the Uniswap V2 router
      */
-    function setUniswapV2Router(address _routerAddr) external onlyRole(MANAGER) {
+    function setUniswapV2Router(
+        address _routerAddr
+    ) external onlyRole(MANAGER) {
         uniswapV2RouterAddr = _routerAddr;
     }
-    
+
     /**
      * @notice Sets the price feed address for a token
      * @param _tokenAddr Address of the token
      * @param _priceFeedAddr Address of the Chainlink price feed for the token/USD pair
      */
-    function setPriceFeed(address _tokenAddr, address _priceFeedAddr) external onlyRole(MANAGER) {
+    function setPriceFeed(
+        address _tokenAddr,
+        address _priceFeedAddr
+    ) external onlyRole(MANAGER) {
         priceFeedAddresses[_tokenAddr] = _priceFeedAddr;
     }
 
@@ -477,34 +451,28 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      */
     function getPrice(address _tokenAddr) public view returns (uint256) {
         address priceFeedAddr = priceFeedAddresses[_tokenAddr];
-        
+
         if (priceFeedAddr == address(0)) {
             // If no price feed is set for this token, return a default value
             return 0.05 * 1e18;
         }
-        
+
         // Get the latest price from Chainlink
         AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddr);
-        (
-            ,
-            int256 price,
-            ,
-            ,
-            
-        ) = priceFeed.latestRoundData();
-        
+        (, int256 price, , , ) = priceFeed.latestRoundData();
+
         if (price <= 0) {
             // If price is invalid, return a default value
             return 0.05 * 1e18;
         }
-        
+
         // Get the number of decimals in the price feed
         uint8 decimals = priceFeed.decimals();
-        
+
         // Calculate how many tokens are equivalent to 1 USD
         // Price from Chainlink is in USD per token with 'decimals' decimal places
         // We want tokens per USD with 18 decimal places
-        
+
         // First, normalize the price to 18 decimals
         uint256 normalizedPrice;
         if (decimals < 18) {
@@ -512,7 +480,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         } else {
             normalizedPrice = uint256(price) / (10 ** (decimals - 18));
         }
-        
+
         // Then calculate tokens per USD: 1e36 / price
         // 1e36 = 1 USD (with 18 decimals) * 1e18 (for division precision)
         return (1e36) / normalizedPrice;
