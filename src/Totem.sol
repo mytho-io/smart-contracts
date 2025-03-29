@@ -8,6 +8,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
+import {TotemToken} from "./TotemToken.sol";
 
 /**
  * @title Totem
@@ -16,8 +17,9 @@ import {AddressRegistry} from "./AddressRegistry.sol";
  */
 contract Totem is AccessControlUpgradeable {
     using SafeERC20 for IERC20;
+    using SafeERC20 for TotemToken;
 
-    IERC20 private totemToken;
+    TotemToken private totemToken;
     IERC20 private paymentToken;
     IERC20 private liquidityToken;
     IERC20 private mythoToken;
@@ -60,7 +62,7 @@ contract Totem is AccessControlUpgradeable {
      * @param _isCustomToken Flag indicating if the token is custom (not burnable)
      */
     function initialize(
-        IERC20 _totemToken,
+        TotemToken _totemToken,
         bytes memory _dataHash,
         address _registryAddr,
         bool _isCustomToken
@@ -116,10 +118,7 @@ contract Totem is AccessControlUpgradeable {
             totemToken.safeTransfer(treasuryAddr, _totemTokenAmount);
         } else {
             // For standard TotemTokens, burn them
-            TotemTokenDistributor(totemDistributorAddr).burnTotemTokens(
-                address(this),
-                _totemTokenAmount
-            );
+            totemToken.burn(_totemTokenAmount);
         }
 
         // Transfer the proportional payment tokens to the caller if there are any

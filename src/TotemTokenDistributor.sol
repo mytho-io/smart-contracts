@@ -175,7 +175,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             maxTokensPerAddress
         ) revert WrongAmount(_totemTokenAmount);
 
-        uint256 paymentTokenAmount = _totemsToPaymentToken(
+        uint256 paymentTokenAmount = totemsToPaymentToken(
             paymentTokenAddr,
             _totemTokenAmount
         );
@@ -199,7 +199,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             address(this),
             paymentTokenAmount
         );
-        IERC20(_totemTokenAddr).transfer(msg.sender, _totemTokenAmount);
+        IERC20(_totemTokenAddr).transfer(msg.sender, _totemTokenAmount);        
 
         emit TotemTokensBought(
             msg.sender,
@@ -207,6 +207,11 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             _totemTokenAddr,
             _totemTokenAmount
         );
+
+        // close sale period when the remaining tokens are exactly what's needed for the pool
+        if (IERC20(_totemTokenAddr).balanceOf(address(this)) == POOL_INITIAL_SUPPLY) {
+            _closeSalePeriod(_totemTokenAddr);
+        }
     }
 
     /// @notice Sell totems for used payment token in sale period
@@ -246,26 +251,12 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
         IERC20(_paymentTokenAddr).transfer(msg.sender, paymentTokensBack);
 
-        // when all tokens are sold sale period is closed
-        if (IERC20(_totemTokenAddr).balanceOf(address(this)) == 0) {
-            _closeSalePeriod(_totemTokenAddr);
-        }
-
         emit TotemTokensSold(
             msg.sender,
             _paymentTokenAddr,
             _totemTokenAddr,
             _totemTokenAmount
         );
-    }
-
-    function burnTotemTokens(
-        address _totemTokenAddr,
-        uint256 _totemTokenAmount
-    ) external {
-        if (msg.sender != totems[_totemTokenAddr].totemAddr)
-            revert OnlyForTotem();
-        TotemToken(_totemTokenAddr).burn(msg.sender, _totemTokenAmount);
     }
 
     /// INTERNAL LOGIC
@@ -329,7 +320,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             liquidity
         );
     }
-
+event Debug();
     /**
      * @notice Adds liquidity to a Uniswap V2 pool
      * @dev Approves tokens for the router and adds liquidity to the pool
@@ -382,6 +373,8 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             block.timestamp + 600 // Deadline: 10 minutes from now
         );
 
+        emit Debug();
+
         return (liquidity, liquidityToken);
     }
 
@@ -428,14 +421,14 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /// READERS
 
-    function _totemsToPaymentToken(
+    function totemsToPaymentToken(
         address _tokenAddr,
         uint256 _totemsAmount
     ) public view returns (uint256) {
         return (_totemsAmount * oneTotemPriceInUsd) / getPrice(_tokenAddr);
     }
 
-    function _paymentTokenToTotems(
+    function paymentTokenToTotems(
         address _tokenAddr,
         uint256 _paymentTokenAmount
     ) public view returns (uint256) {
@@ -495,5 +488,39 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _totemTokenAddr
     ) external view returns (SalePosInToken memory) {
         return salePositions[_addr][_totemTokenAddr];
+    }
+
+    /**
+     * @notice Calculates the number of totem tokens available for purchase
+     * @dev Takes into account the user's current balance and the maximum allowed tokens per address
+     * @param _userAddr Address of the user
+     * @param _totemTokenAddr Address of the totem token
+     * @return The number of totem tokens available for purchase
+     */
+    function getAvailableTokensForPurchase(
+        address _userAddr,
+        address _totemTokenAddr
+    ) external view returns (uint256) {
+        if (!totems[_totemTokenAddr].registered || !totems[_totemTokenAddr].isSalePeriod) {
+            return 0; // Tokens are only available for purchase during sale period
+        }
+
+        // Get user's current balance
+        uint256 currentBalance = IERC20(_totemTokenAddr).balanceOf(_userAddr);
+        
+        // Calculate how many more tokens the user can buy based on the max limit
+        if (currentBalance >= maxTokensPerAddress) {
+            return 0; // User has reached the maximum allowed tokens
+        }
+        
+        uint256 remainingAllowance = maxTokensPerAddress - currentBalance;
+        
+        // Check contract's available balance (excluding pool initial supply)
+        uint256 contractBalance = IERC20(_totemTokenAddr).balanceOf(address(this));
+        uint256 availableForSale = contractBalance > POOL_INITIAL_SUPPLY ? 
+                                  contractBalance - POOL_INITIAL_SUPPLY : 0;
+        
+        // Return the minimum of remaining allowance and available tokens
+        return remainingAllowance < availableForSale ? remainingAllowance : availableForSale;
     }
 }

@@ -20,7 +20,7 @@ contract VestingTest is Test {
         beneficiaryA = makeAddr("beneficiaryA");
 
         prank(deployer);
-        mytho = new MYTHO(deployer, deployer, deployer, deployer, deployer);
+        mytho = new MYTHO(deployer, deployer, deployer, deployer);
         vestingWallet = new VestingWallet(beneficiaryA, 100, 1000);
         mytho.mint(address(vestingWallet), 100e18);
     }

@@ -24,14 +24,11 @@ contract MYTHO is ERC20 {
     // Team allocation (20% of total supply)
     uint256 public constant TEAM_ALLOCATION = 200_000_000 * 10**18;
     
-    // Treasury allocation (18% of total supply)
-    uint256 public constant TREASURY_ALLOCATION = 180_000_000 * 10**18;
+    // Treasury allocation (23% of total supply - includes previous airdrop allocation)
+    uint256 public constant TREASURY_ALLOCATION = 230_000_000 * 10**18;
     
     // Mytho AMM incentives (7% of total supply)
     uint256 public constant AMM_INCENTIVES = 70_000_000 * 10**18;
-    
-    // Airdrop allocation (5% of total supply)
-    uint256 public constant AIRDROP_ALLOCATION = 50_000_000 * 10**18;
 
     // Vesting duration constants
     uint64 public constant ONE_YEAR = 12 * 30 days;
@@ -46,7 +43,6 @@ contract MYTHO is ERC20 {
     address public immutable teamVesting;
     address public immutable ammVesting;
     address public immutable treasury;
-    address public immutable airdrop;
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
@@ -58,20 +54,17 @@ contract MYTHO is ERC20 {
      * @param _teamReceiver Address to receive team allocation
      * @param _treasuryReceiver Address to receive treasury allocation
      * @param _ammReceiver Address to receive AMM incentives
-     * @param _airdropReceiver Address to receive airdrop allocation
      */
     constructor(
         address _meritManager,
         address _teamReceiver,
         address _treasuryReceiver,
-        address _ammReceiver,
-        address _airdropReceiver
+        address _ammReceiver
     ) ERC20("MYTHO Government Token", "MYTHO") {
         if (_meritManager == address(0)) revert ZeroAddressNotAllowed("totem receiver");
         if (_teamReceiver == address(0)) revert ZeroAddressNotAllowed("team receiver");
         if (_treasuryReceiver == address(0)) revert ZeroAddressNotAllowed("treasury receiver");
         if (_ammReceiver == address(0)) revert ZeroAddressNotAllowed("AMM receiver");
-        if (_airdropReceiver == address(0)) revert ZeroAddressNotAllowed("airdrop receiver");
 
         // Set the start timestamp for vesting
         uint64 startTimestamp = uint64(block.timestamp);
@@ -90,9 +83,6 @@ contract MYTHO is ERC20 {
         
         // Treasury (no vesting, immediate access)
         treasury = _treasuryReceiver;
-        
-        // Airdrop (no vesting, immediate access)
-        airdrop = _airdropReceiver;
 
         // Mint the total supply of tokens
         _mint(address(this), TOTAL_SUPPLY);
@@ -105,7 +95,6 @@ contract MYTHO is ERC20 {
         _transfer(address(this), teamVesting, TEAM_ALLOCATION);
         _transfer(address(this), ammVesting, AMM_INCENTIVES);
         _transfer(address(this), treasury, TREASURY_ALLOCATION);
-        _transfer(address(this), airdrop, AIRDROP_ALLOCATION);
     }
 
     /**

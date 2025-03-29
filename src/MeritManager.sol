@@ -6,6 +6,7 @@ import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/ut
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {AddressRegistry} from "./AddressRegistry.sol";
 
@@ -16,6 +17,7 @@ import {AddressRegistry} from "./AddressRegistry.sol";
  */
 contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;    
+    using Address for address payable;
 
     // State variables
     address public mythoToken;
@@ -173,11 +175,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         if (msg.value > boostFee) {
             // Refund excess boost fee
-            payable(msg.sender).transfer(msg.value - boostFee);
-        } else {
-            // Transfer boost fee to revenue pool
-            payable(treasuryAddr).transfer(boostFee);
+            payable(msg.sender).sendValue(msg.value - boostFee);
         }
+
+        // Transfer boost fee to revenue pool
+        payable(treasuryAddr).sendValue(boostFee);
 
         // Mark user as having boosted in this period
         userBoostedInPeriod[currentPeriod_][msg.sender] = true;
@@ -243,10 +245,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _currentPeriod = currentPeriod();
 
         // Only process completed periods, not the current period
-        if (_currentPeriod > lastProcessedPeriod + 1) {
+        if (_currentPeriod > lastProcessedPeriod) {
             // Process all completed periods up to but not including the current period
             for (
-                uint256 period = lastProcessedPeriod + 1;
+                uint256 period = lastProcessedPeriod;
                 period < _currentPeriod;
                 period++
             ) {
@@ -255,7 +257,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             }
 
             wallet.release(address(mythoToken));
-            lastProcessedPeriod = _currentPeriod - 1; // Set the last processed period to the previous period
+            lastProcessedPeriod = _currentPeriod; // Set the last processed period to the previous period
         }
     }
 
@@ -444,7 +446,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function setOneTotemBoost(
         uint256 _oneTotemBoost
     ) external onlyRole(MANAGER) {
-        _updateState();
         oneTotemBoost = _oneTotemBoost;
         emit ParameterUpdated("oneTotemBoost", _oneTotemBoost);
     }
@@ -456,7 +457,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function setMythmsMultiplier(
         uint256 _mythumMultiplier
     ) external onlyRole(MANAGER) {
-        _updateState();
         mythumMultiplier = _mythumMultiplier;
         emit ParameterUpdated("mythumMultiplier", _mythumMultiplier);
     }
@@ -466,7 +466,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _boostFee New boost fee
      */
     function setBoostFee(uint256 _boostFee) external onlyRole(MANAGER) {
-        _updateState();
         boostFee = _boostFee;
         emit ParameterUpdated("boostFee", _boostFee);
     }
@@ -502,7 +501,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function setPeriodDuration(
         uint256 _periodDuration
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _updateState();
         periodDuration = _periodDuration;
         emit ParameterUpdated("periodDuration", _periodDuration);
     }

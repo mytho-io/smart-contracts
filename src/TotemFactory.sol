@@ -19,6 +19,7 @@ contract TotemFactory is AccessControlUpgradeable {
     address private beaconAddr;
     address private treasuryAddr;
     address private meritManagerAddr;
+    address private registryAddr;
     
     // ASTR token address
     address private astrTokenAddr;
@@ -71,6 +72,7 @@ contract TotemFactory is AccessControlUpgradeable {
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         beaconAddr = _beaconAddr;
+        registryAddr = _registryAddr;
         
         astrTokenAddr = _astrTokenAddr;
         creationFee = 1 ether;
@@ -112,13 +114,11 @@ contract TotemFactory is AccessControlUpgradeable {
         BeaconProxy proxy = new BeaconProxy(
             beaconAddr,
             abi.encodeWithSignature(
-                "initialize(address,bytes,address,address,bool,address)",
+                "initialize(address,bytes,address,bool)",
                 address(totemToken),
                 _dataHash,
-                address(totemDistributor),
-                treasuryAddr,
-                false,
-                meritManagerAddr
+                registryAddr,
+                false
             )
         );
 
@@ -154,13 +154,11 @@ contract TotemFactory is AccessControlUpgradeable {
         BeaconProxy proxy = new BeaconProxy(
             beaconAddr,
             abi.encodeWithSignature(
-                "initialize(address,bytes,address,address,bool,address)",
+                "initialize(address,bytes,address,bool)",
                 _tokenAddr,
                 _dataHash,
-                address(totemDistributor),
-                treasuryAddr,
-                true,
-                meritManagerAddr
+                registryAddr,
+                true
             )
         );
 
