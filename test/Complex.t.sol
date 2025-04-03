@@ -19,12 +19,12 @@ import {AddressRegistry} from "../src/AddressRegistry.sol";
 
 import {MockToken} from "./mocks/MockToken.sol";
 
-import { IUniswapV2Factory } from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Factory.sol";
-import { IUniswapV2Pair } from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Pair.sol";
-import { IUniswapV2Router02 } from "lib/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
-import { WETH } from "lib/solmate/src/tokens/WETH.sol";
+import {IUniswapV2Factory} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import {IUniswapV2Pair} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import {IUniswapV2Router02} from "lib/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
+import {WETH} from "lib/solmate/src/tokens/WETH.sol";
 
-import { Deployer } from "test/util/Deployer.sol";
+import {Deployer} from "test/util/Deployer.sol";
 
 contract ComplexTest is Test {
     UpgradeableBeacon beacon;
@@ -62,38 +62,144 @@ contract ComplexTest is Test {
     address deployer;
     address userA;
     address userB;
+    address userC;
+    address userD;
 
     function setUp() public {
         deployer = makeAddr("deployer");
         userA = makeAddr("userA");
         userB = makeAddr("userB");
+        userC = makeAddr("userC");
+        userD = makeAddr("userD");
 
         prank(deployer);
         _deploy();
     }
 
     // Test totem creation and initial token distribution
-    function test_TotemCreating() public {
+    function test_TotemCreating_NewToken() public {
+        uint256 initTreasuryBalanceInFeeTokens = IERC20(factory.getFeeToken())
+            .balanceOf(address(treasury));
+
         assertEq(factory.getLastId(), 0);
 
-        address totemTokenAddr = createTotem(userA);
+        // get logs record and check if id of created totem eq to zero
+        vm.recordLogs();
+        _createTotem(userA);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        (, , uint256 id) = abi.decode(
+            logs[logs.length - 1].data,
+            (address, address, uint256)
+        );
+        assertEq(id, 0);
         assertEq(factory.getLastId(), 1);
+        assertEq(
+            IERC20(factory.getFeeToken()).balanceOf(address(treasury)),
+            initTreasuryBalanceInFeeTokens + factory.getCreationFee()
+        );
 
-        TF.TotemData memory data = factory.getTotemData(0);
+        // check if totem with id = 1 doesn't exist
+        vm.expectRevert(
+            abi.encodeWithSelector(TF.TotemNotFound.selector, 1)
+        );
+        TF.TotemData memory data = factory.getTotemData(1);
+
+        // get data of created totem and check if data set
+        data = factory.getTotemData(0);
         assertEq(data.creator, userA);
+        assertTrue(data.totemAddr != address(0));
         assertFalse(data.isCustomToken);
 
-        TT token = TT(data.tokenAddr);
+        TT token = TT(data.totemTokenAddr);
         assertEq(token.name(), "TotemToken");
         assertEq(token.symbol(), "TT");
 
         assertEq(token.balanceOf(userA), 250_000 ether);
         assertEq(token.balanceOf(address(distr)), 899_750_000 ether);
         assertEq(token.balanceOf(data.totemAddr), 100_000_000 ether);
+
+        TTD.TotemData memory dataDistr = distr.getTotemData(
+            data.totemTokenAddr
+        );
+        assertEq(dataDistr.totemAddr, data.totemAddr);
+    }
+
+    // Test creating totem with custom token
+    function test_TotemCreating_CustomToken() public {
+        MockToken customToken = new MockToken();
+        customToken.mint(deployer, 1_000_000 ether);
+
+        prank(userA);
+        // try to create a totem without fee tokens approve
+        vm.expectRevert();
+        factory.createTotemWithExistingToken(
+            "customDataHash",
+            address(customToken)
+        );
+
+        astrToken.approve(address(factory), factory.getCreationFee());
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TF.NotWhitelisted.selector,
+                address(customToken)
+            )
+        );
+        factory.createTotemWithExistingToken(
+            "customDataHash",
+            address(customToken)
+        );
+
+        prank(deployer);
+        factory.addTokenToWhitelist(address(customToken));
+        assertTrue(
+            factory.hasRole(keccak256("WHITELISTED"), address(customToken))
+        );
+
+        prank(userA);
+        factory.createTotemWithExistingToken(
+            "customDataHash",
+            address(customToken)
+        );
+
+        TF.TotemData memory data = factory.getTotemData(0);
+        assertTrue(data.isCustomToken);
+        assertEq(data.totemTokenAddr, address(customToken));
+        assertEq(data.creator, userA);
+
+        // check if new totem not registered in TotemTokenDistributor
+        TTD.TotemData memory ttdData = distr.getTotemData(data.totemTokenAddr);
+        assertFalse(ttdData.registered);
+
+        // check if new totem registered in MeritManager
+        assertTrue(mm.registeredTotems(data.totemAddr));
+    }
+
+    function test_getTotemData() public {
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(
+            factory.getLastId() - 1
+        );
+
+        assertEq(data.creator, userA);
+        assertTrue(data.totemTokenAddr != address(0));
+        assertTrue(data.totemAddr != address(0));
+        assertTrue(keccak256(data.dataHash) == keccak256("dataHash"));
+        assertFalse(data.isCustomToken);
+    }
+
+    // Utility function to create a totem
+    function _createTotem(address _totemCreator) internal returns (address) {
+        prank(_totemCreator);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        factory.createTotem("dataHash", "TotemToken", "TT");
+        TF.TotemData memory totemData = factory.getTotemData(
+            factory.getLastId() - 1
+        );
+        return totemData.totemTokenAddr;
     }
 
     // Test price conversion functions
-    function test_PriceObtaining() public {
+    function test_PriceObtaining() public view {
         address pToken = address(paymentToken);
         uint256 totemsToPayment = distr.totemsToPaymentToken(
             pToken,
@@ -131,14 +237,34 @@ contract ComplexTest is Test {
 
     // Test buying totem tokens
     function test_Buying() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
 
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
         uint256 balanceBefore = paymentToken.balanceOf(userA);
         uint256 totemBalanceBefore = IERC20(totemTokenAddr).balanceOf(userA);
 
+        uint256 available = distr.getAvailableTokensForPurchase(
+            userA,
+            totemTokenAddr
+        );
+        uint256 totemTokensExpectedToReceive = distr.paymentTokenToTotems(
+            totemTokenAddr,
+            100 ether
+        );
+
+        assertEq(available, distr.maxTokensPerAddress() - 250_000 ether);
+        assertEq(
+            distr.getAvailableTokensForPurchase(userB, totemTokenAddr),
+            distr.maxTokensPerAddress()
+        );
+
         distr.buy(totemTokenAddr, 100 ether);
+        
+        assertEq(
+            distr.maxTokensPerAddress() - 250_000 ether - 100 ether,
+            distr.getAvailableTokensForPurchase(userA, totemTokenAddr)
+        );
 
         assertEq(
             paymentToken.balanceOf(userA),
@@ -153,7 +279,7 @@ contract ComplexTest is Test {
 
     // Test selling totem tokens
     function test_Selling() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
 
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
@@ -179,7 +305,7 @@ contract ComplexTest is Test {
 
     // Test burning tokens after sale period ends
     function test_BurningAfterSale() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
 
         prank(userA);
         paymentToken.mint(userA, 100 ether); // Ensure enough balance
@@ -208,7 +334,7 @@ contract ComplexTest is Test {
 
     // Test merit points allocation and MYTHO claiming
     function test_MeritAndClaim() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
 
@@ -235,7 +361,7 @@ contract ComplexTest is Test {
 
     // Test transfer restrictions during sale period
     function test_SalePeriodRestrictions() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
         TT token = TT(totemTokenAddr);
 
         prank(userA);
@@ -243,33 +369,15 @@ contract ComplexTest is Test {
         token.transfer(userB, 100 ether);
     }
 
-    // Test creating totem with custom token
-    function test_CreateTotemWithCustomToken() public {
-        MockToken customToken = new MockToken();
-        customToken.mint(deployer, 1_000_000 ether);
-
-        prank(deployer);
-        factory.addTokenToWhitelist(address(customToken));
-
-        prank(userA);
-        astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotemWithExistingToken(
-            "customDataHash",
-            address(customToken)
-        );
-
-        TF.TotemData memory data = factory.getTotemData(0);
-        assertTrue(data.isCustomToken);
-        assertEq(data.tokenAddr, address(customToken));
-        assertEq(data.creator, userA);
-    }
-
     // Test boosting totem in Mythus period
     function test_TotemBoosting() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
 
-        uint256 available = distr.getAvailableTokensForPurchase(userA, totemTokenAddr);
+        uint256 available = distr.getAvailableTokensForPurchase(
+            userA,
+            totemTokenAddr
+        );
         assertEq(available, 4_750_000 ether);
 
         // but all totem tokens and check if the distr balance eq to zero
@@ -300,7 +408,7 @@ contract ComplexTest is Test {
 
         // Warp to Mythus period (last 25% of period)
         warp(23 days);
-        
+
         prank(userA);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
 
@@ -343,7 +451,7 @@ contract ComplexTest is Test {
 
     // Test edge case: buying more than max tokens per address
     function test_BuyingExceedsMaxTokens() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
 
         prank(userA);
         paymentToken.mint(userA, 1_000_000 ether);
@@ -357,7 +465,7 @@ contract ComplexTest is Test {
 
     // Test claiming MYTHO for already claimed period
     function test_ClaimAlreadyClaimedPeriod() public {
-        address totemTokenAddr = createTotem(userA);
+        address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
 
@@ -376,45 +484,404 @@ contract ComplexTest is Test {
         prank(address(totem));
         totem.collectMYTH(0);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(MM.AlreadyClaimed.selector, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(MM.AlreadyClaimed.selector, 0));
         totem.collectMYTH(0); // Should revert on second attempt
     }
 
-    // Utility function to create a totem
-    function createTotem(address _totemCreator) public returns (address) {
-        prank(_totemCreator);
+    // Test multiple totems competing for merit points
+    function test_MultipleTotemsCompetingForMerit() public {
+        // Create three totems
+        address totemToken1 = _createTotem(userA);
+        address totemToken2 = _createTotem(userB);
+        address totemToken3 = _createTotem(userC);
+
+        // prank(userB); astrToken.approve(address(factory), 100 ether);
+        // prank(userC); astrToken.approve(address(factory), 100 ether);
+
+        TF.TotemData memory data1 = factory.getTotemData(0);
+        TF.TotemData memory data2 = factory.getTotemData(1);
+        TF.TotemData memory data3 = factory.getTotemData(2);
+
+        Totem totem1 = Totem(data1.totemAddr);
+        Totem totem2 = Totem(data2.totemAddr);
+        Totem totem3 = Totem(data3.totemAddr);
+
+        // Buy all tokens to end sale period for all totems
+        _buyAllTotemTokens(totemToken1);
+        _buyAllTotemTokens(totemToken2);
+        _buyAllTotemTokens(totemToken3);
+
+        // Credit different merit points to each totem
+        prank(deployer);
+        mm.creditMerit(data1.totemAddr, 1000); // 50%
+        mm.creditMerit(data2.totemAddr, 600);  // 30%
+        mm.creditMerit(data3.totemAddr, 400);  // 20%
+
+        // Verify total merit points
+        assertEq(mm.totalMeritPoints(0), 2000);
+        
+        // Move to next period
+        warp(31 days);
+        mm.updateState();
+
+        // Record MYTHO balances before claiming
+        uint256 mythoBalanceBefore1 = mytho.balanceOf(data1.totemAddr);
+        uint256 mythoBalanceBefore2 = mytho.balanceOf(data2.totemAddr);
+        uint256 mythoBalanceBefore3 = mytho.balanceOf(data3.totemAddr);
+
+        // Claim MYTHO for each totem
+        prank(address(totem1));
+        totem1.collectMYTH(0);
+        
+        prank(address(totem2));
+        totem2.collectMYTH(0);
+        
+        prank(address(totem3));
+        totem3.collectMYTH(0);
+
+        // Get MYTHO balances after claiming
+        uint256 mythoBalanceAfter1 = mytho.balanceOf(data1.totemAddr);
+        uint256 mythoBalanceAfter2 = mytho.balanceOf(data2.totemAddr);
+        uint256 mythoBalanceAfter3 = mytho.balanceOf(data3.totemAddr);
+
+        // Calculate claimed amounts
+        uint256 claimed1 = mythoBalanceAfter1 - mythoBalanceBefore1;
+        uint256 claimed2 = mythoBalanceAfter2 - mythoBalanceBefore2;
+        uint256 claimed3 = mythoBalanceAfter3 - mythoBalanceBefore3;
+
+        // Verify proportional distribution (with small rounding tolerance)
+        assertApproxEqRel(claimed1, claimed2 * 5 / 3, 1e15); // 1000/600 = 5/3
+        assertApproxEqRel(claimed1, claimed3 * 5 / 2, 1e15); // 1000/400 = 5/2
+        assertApproxEqRel(claimed2, claimed3 * 3 / 2, 1e15); // 600/400 = 3/2
+        
+        // Verify total distribution adds up
+        uint256 totalClaimed = claimed1 + claimed2 + claimed3;
+        uint256 expectedRelease = mm.releasedMytho(0);
+        assertApproxEqRel(totalClaimed, expectedRelease, 1e15);
+    }
+
+    // Test totem lifecycle across multiple periods
+    function test_TotemLifecycleAcrossMultiplePeriods() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // End sale period
+        _buyAllTotemTokens(totemTokenAddr);
+
+        // Period 0: Credit merit and boost
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 500);
+        
+        // User boosts in Mythum period
+        warp(23 days); // Move to Mythum period
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Verify period 0 merit points (500 + 10 from boost)
+        assertEq(mm.getTotemMeritPoints(data.totemAddr, 0), 510);
+        
+        // Period 1: Move to next period, claim period 0, and credit new merit
+        warp(8 days); // Move to period 1
+        prank(deployer);
+        mm.updateState();
+        
+        prank(address(totem));
+        totem.collectMYTH(0);
+        
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 800);
+        
+        // User boosts again in period 1 Mythum
+        warp(23 days);
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Verify period 1 merit points (800 + 10 from boost)
+        assertEq(mm.getTotemMeritPoints(data.totemAddr, 1), 810);
+        
+        // Period 2: Move to next period, claim period 1, no merit or boost
+        warp(8 days);
+        prank(deployer);
+        mm.updateState();
+        
+        prank(address(totem));
+        totem.collectMYTH(1);
+        
+        // Period 3: Move to next period, no claim (no merit in period 2)
+        warp(30 days);
+        prank(deployer);
+        mm.updateState();
+        
+        // Credit merit in period 3
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 300);
+        
+        // Verify period 3 merit points
+        assertEq(mm.getTotemMeritPoints(data.totemAddr, 3), 300);
+        
+        // Period 4: Move to next period, claim period 3
+        warp(30 days);
+        prank(deployer);
+        mm.updateState();
+        
+        prank(address(totem));
+        totem.collectMYTH(3);
+        
+        // Verify claimed periods
+        assertTrue(mm.isClaimed(0, data.totemAddr));
+        assertTrue(mm.isClaimed(1, data.totemAddr));
+        assertFalse(mm.isClaimed(2, data.totemAddr)); // No merit in period 2, so not claimed
+        assertTrue(mm.isClaimed(3, data.totemAddr));
+    }
+
+    // Test token burning with multiple users
+    function test_TokenBurningWithMultipleUsers() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+        
+        // End sale period
+        _buyAllTotemTokens(totemTokenAddr);
+        
+        // Credit merit and move to next period to get MYTHO
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 1000);
+        
+        warp(31 days);
+        mm.updateState();
+        
+        prank(address(totem));
+        totem.collectMYTH(0);
+        
+        // Get initial balances
+        uint256 initialMythoBalance = mytho.balanceOf(data.totemAddr);
+        uint256 initialPaymentBalance = paymentToken.balanceOf(data.totemAddr);
+        
+        // Transfer some totem tokens to multiple users
+        
+        uint256 userAAmount = 100_000 ether;
+        uint256 userCAmount = 50_000 ether;
+        uint256 userDAmount = 25_000 ether;
+        
+        prank(userA);
+        IERC20(totemTokenAddr).transfer(userC, userCAmount);
+        IERC20(totemTokenAddr).transfer(userD, userDAmount);
+        
+        // Users burn their tokens
+        prank(userA);
+        IERC20(totemTokenAddr).approve(data.totemAddr, userAAmount);
+        totem.burnTotemTokens(userAAmount);
+        
+        prank(userC);
+        IERC20(totemTokenAddr).approve(data.totemAddr, userCAmount);
+        totem.burnTotemTokens(userCAmount);
+        
+        prank(userD);
+        IERC20(totemTokenAddr).approve(data.totemAddr, userDAmount);
+        totem.burnTotemTokens(userDAmount);
+        
+        // Calculate total burned amount
+        uint256 totalBurned = userAAmount + userCAmount + userDAmount;
+        
+        // Verify token supply decreased
+        uint256 expectedSupply = 1_000_000_000 ether - totalBurned;
+        assertEq(IERC20(totemTokenAddr).totalSupply(), expectedSupply);
+        
+        // Verify proportional distribution of assets
+        uint256 userAMythoExpected = (initialMythoBalance * userAAmount) / expectedSupply;
+        uint256 userCMythoExpected = (initialMythoBalance * userCAmount) / expectedSupply;
+        uint256 userDMythoExpected = (initialMythoBalance * userDAmount) / expectedSupply;
+        
+        // Check that the proportions are roughly correct (allowing for rounding)
+        assertApproxEqRel(mytho.balanceOf(userA), userAMythoExpected, 1e15);
+        assertApproxEqRel(mytho.balanceOf(userC), userCMythoExpected, 1e15);
+        assertApproxEqRel(mytho.balanceOf(userD), userDMythoExpected, 1e15);
+    }
+
+    // Test error cases for TotemTokenDistributor
+    function test_TotemTokenDistributorErrorCases() public {
+        address totemTokenAddr = _createTotem(userA);
+        
+        // Test buying with zero amount
+        prank(userA);
+        vm.expectRevert(abi.encodeWithSelector(TTD.WrongAmount.selector, 0));
+        distr.buy(totemTokenAddr, 0);
+        
+        // Test buying with insufficient payment token balance
+        prank(userA);
+        paymentToken.approve(address(distr), type(uint256).max);
+        uint256 balance = paymentToken.balanceOf(userA);
+        uint256 tooMuchTokens = distr.paymentTokenToTotems(address(paymentToken), balance + 1 ether);
+        vm.expectRevert();
+        distr.buy(totemTokenAddr, tooMuchTokens);
+        
+        // Test selling with zero amount
+        prank(userA);
+        vm.expectRevert(abi.encodeWithSelector(TTD.WrongAmount.selector, 0));
+        distr.sell(totemTokenAddr, 0);
+        
+        // Test selling more than owned
+        prank(userA);
+        uint256 ownedAmount = IERC20(totemTokenAddr).balanceOf(userA);
+        IERC20(totemTokenAddr).approve(address(distr), type(uint256).max);
+        vm.expectRevert(abi.encodeWithSelector(TTD.WrongAmount.selector, ownedAmount + 1));
+        distr.sell(totemTokenAddr, ownedAmount + 1);
+        
+        // Test buying from unknown token
+        address fakeToken = address(0x123);
+        prank(userA);
+        vm.expectRevert(abi.encodeWithSelector(TTD.UnknownTotemToken.selector, fakeToken));
+        distr.buy(fakeToken, 100 ether);
+    }
+
+    // Test MeritManager error cases
+    function test_MeritManagerErrorCases() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        
+        // Test crediting merit to non-registered totem
+        address fakeTotem = address(0x123);
+        prank(deployer);
+        vm.expectRevert(MM.TotemNotRegistered.selector);
+        mm.creditMerit(fakeTotem, 100);
+        
+        // Test boosting non-registered totem
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        vm.expectRevert(MM.TotemNotRegistered.selector);
+        mm.boostTotem{value: 0.001 ether}(fakeTotem);
+        
+        // Test claiming for invalid period
+        _buyAllTotemTokens(totemTokenAddr);
+        Totem totem = Totem(data.totemAddr);
+        prank(address(totem));
+        vm.expectRevert(abi.encodeWithSelector(MM.InvalidPeriod.selector));
+        totem.collectMYTH(999); // Non-existent period
+        
+        // Test claiming with no merit points
+        prank(address(totem));
+        vm.expectRevert(MM.NoMythoToClaim.selector);
+        totem.collectMYTH(0); // No merit points in period 0
+    }
+
+    // Test TotemFactory error cases
+    function test_TotemFactoryErrorCases() public {
+        // Test creating totem with empty parameters
+        prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotem("dataHash", "TotemToken", "TT");
-        TF.TotemData memory totemData = factory.getTotemData(
-            factory.getLastId() - 1
-        );
-        return totemData.tokenAddr;
+        vm.expectRevert(abi.encodeWithSelector(TF.InvalidTotemParameters.selector, "Empty token name or symbol"));
+        factory.createTotem("", "", "");
+        
+        // Test creating totem with insufficient fee
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee() - 1);
+        vm.expectRevert();
+        factory.createTotem("dataHash", "Token", "TKN");
+        
+        // Test creating totem with custom token not whitelisted
+        MockToken customToken = new MockToken();
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        vm.expectRevert(abi.encodeWithSelector(TF.NotWhitelisted.selector, address(customToken)));
+        factory.createTotemWithExistingToken("dataHash", address(customToken));
+        
+        // Test getting non-existent totem data
+        vm.expectRevert(abi.encodeWithSelector(TF.TotemNotFound.selector, 999));
+        factory.getTotemData(999);
+    }
+
+    // Test Treasury functionality
+    function test_TreasuryFunctionality() public {
+        address recipient = makeAddr("recipient");
+        
+        // Test withdrawing ERC20 tokens
+        prank(deployer);
+        paymentToken.mint(address(treasury), 1000 ether);
+        
+        // Withdraw half the tokens
+        prank(deployer);
+        treasury.withdrawERC20(address(paymentToken), recipient, 500 ether);
+        
+        // Verify balances
+        assertEq(paymentToken.balanceOf(recipient), 500 ether);
+        assertEq(paymentToken.balanceOf(address(treasury)), 500 ether);
+        
+        // Test withdrawing native tokens
+        vm.deal(address(treasury), 2 ether);
+        
+        prank(deployer);
+        treasury.withdrawNative(payable(recipient), 1 ether);
+        
+        // Verify balances
+        assertEq(recipient.balance, 1 ether);
+        assertEq(address(treasury).balance, 1 ether);
+        
+        // Test error cases
+        prank(deployer);
+        vm.expectRevert();
+        treasury.withdrawERC20(address(paymentToken), recipient, 1000 ether); // More than available
+        
+        prank(deployer);
+        vm.expectRevert();
+        treasury.withdrawNative(payable(recipient), 2 ether); // More than available
+    }
+
+    // Test Totem token burning error cases
+    function test_TotemBurningErrorCases() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+        
+        // Test burning before sale period ends
+        prank(userA);
+        IERC20(totemTokenAddr).approve(data.totemAddr, 100 ether);
+        vm.expectRevert(Totem.SalePeriodNotEnded.selector);
+        totem.burnTotemTokens(100 ether);
+        
+        // End sale period
+        _buyAllTotemTokens(totemTokenAddr);
+        
+        // Test burning zero amount
+        prank(userA);
+        vm.expectRevert(Totem.ZeroAmount.selector);
+        totem.burnTotemTokens(0);
+        
+        // Test burning more than owned
+        prank(userA);
+        uint256 balance = IERC20(totemTokenAddr).balanceOf(userA);
+        IERC20(totemTokenAddr).approve(data.totemAddr, balance + 1);
+        vm.expectRevert(Totem.InsufficientTotemBalance.selector);
+        totem.burnTotemTokens(balance + 1);
     }
 
     function _buyAllTotemTokens(address _totemTokenAddr) internal {
         uint256 counter = type(uint32).max;
         do {
-            address user = vm.addr(uint256(keccak256(abi.encodePacked(counter++))));
+            address user = vm.addr(
+                uint256(keccak256(abi.encodePacked(counter++)))
+            );
             if (user == address(distr)) continue;
             vm.deal(user, 1 ether);
             paymentToken.mint(user, 2_500_000 ether);
 
             prank(user);
-            uint256 available = distr.getAvailableTokensForPurchase(user, _totemTokenAddr);
+            uint256 available = distr.getAvailableTokensForPurchase(
+                user,
+                _totemTokenAddr
+            );
             paymentToken.approve(address(distr), available);
 
             distr.buy(_totemTokenAddr, available);
-        } while (
-            IERC20(_totemTokenAddr).balanceOf(address(distr)) > 0
-        );
+        } while (IERC20(_totemTokenAddr).balanceOf(address(distr)) > 0);
     }
 
     // Deploy all contracts
     function _deploy() internal {
         // Uni V2 deploying
-        uniFactory = Deployer.deployFactory(deployer);        
+        uniFactory = Deployer.deployFactory(deployer);
         // pair = IUniswapV2Pair(uniFactory.createPair(address(tokenA), address(tokenB)));
         weth = Deployer.deployWETH();
         router = Deployer.deployRouterV2(address(uniFactory), address(weth));
@@ -442,6 +909,9 @@ contract ComplexTest is Test {
 
         astrToken = new MockToken();
         astrToken.mint(userA, 1_000_000 ether);
+        astrToken.mint(userB, 1_000_000 ether);
+        astrToken.mint(userC, 1_000_000 ether);
+        astrToken.mint(userD, 1_000_000 ether);
 
         // MeritManager
         mmImpl = new MM();

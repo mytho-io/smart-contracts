@@ -33,7 +33,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
     mapping(uint256 period => mapping(address totemAddress => uint256 points))
         public totemMerit; // Total merit points across all totems per period
-    mapping(uint256 period => bool isClaimed) public isClaimed; // Whether rewards have been claimed for a period
+    mapping(uint256 period => mapping(address totemAddr => bool claimed)) public isClaimed; // Whether rewards have been claimed for a period by a specific totem
     mapping(uint256 period => uint256 releasedMytho) public releasedMytho; // Total MYTHO released per period
 
     // Period tracking
@@ -205,7 +205,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
-        if (isClaimed[_periodNum]) revert AlreadyClaimed(_periodNum);
+        if (isClaimed[_periodNum][totemAddr]) revert AlreadyClaimed(_periodNum);
         if (_periodNum > currentPeriod()) revert InvalidPeriod();
 
         _updateState();
@@ -219,7 +219,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 totalPoints = totalMeritPoints[_periodNum];
         uint256 totemPoints = totemMerit[_periodNum][totemAddr];
 
-        isClaimed[_periodNum] = true;
+        isClaimed[_periodNum][totemAddr] = true;
 
         uint256 totemShare = (releasedMytho[_periodNum] * totemPoints) /
             totalPoints;
@@ -327,7 +327,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (
             !registeredTotems[_totemAddr] ||
             hasRole(BLACKLISTED, _totemAddr) ||
-            isClaimed[_periodNum] ||
+            isClaimed[_periodNum][_totemAddr] ||
             totemMerit[_periodNum][_totemAddr] == 0 ||
             totalMeritPoints[_periodNum] == 0 ||
             releasedMytho[_periodNum] == 0

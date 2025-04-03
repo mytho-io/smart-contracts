@@ -33,7 +33,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     MeritManager private meritManager;
     IERC20 private mytho;
 
-    uint256 private maxTokensPerAddress;
+    uint256 public maxTokensPerAddress;
     uint256 private oneTotemPriceInUsd;
 
     // contract address for revenue in payment tokens
@@ -123,11 +123,6 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         oneTotemPriceInUsd = 0.00004 ether;
     }
 
-    modifier whenSalePeriod(address _totemTokenAddr) {
-        if (!totems[_totemTokenAddr].isSalePeriod) revert OnlyInSalePeriod();
-        _;
-    }
-
     /// @notice Being called by TotemFactory during totem creation
     function register() external {
         // get info about the totem being created
@@ -136,10 +131,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
         if (totemDataFromFactory.isCustomToken)
             revert NotAllowedForCustomTokens();
-        if (totems[totemDataFromFactory.tokenAddr].registered)
-            revert AlreadyRegistered(totemDataFromFactory.tokenAddr);
+        if (totems[totemDataFromFactory.totemTokenAddr].registered)
+            revert AlreadyRegistered(totemDataFromFactory.totemTokenAddr);
 
-        totems[totemDataFromFactory.tokenAddr] = TotemData(
+        totems[totemDataFromFactory.totemTokenAddr] = TotemData(
             totemDataFromFactory.totemAddr,
             totemDataFromFactory.creator,
             paymentTokenAddr,
@@ -148,14 +143,14 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             0
         );
 
-        TotemToken token = TotemToken(totemDataFromFactory.tokenAddr);
+        TotemToken token = TotemToken(totemDataFromFactory.totemTokenAddr);
         token.transfer(totemDataFromFactory.creator, 250_000 ether);
         token.transfer(totemDataFromFactory.totemAddr, 100_000_000 ether);
 
         emit TotemRegistered(
             totemDataFromFactory.totemAddr,
             totemDataFromFactory.creator,
-            totemDataFromFactory.tokenAddr
+            totemDataFromFactory.totemTokenAddr
         );
     }
 
@@ -163,16 +158,18 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     function buy(
         address _totemTokenAddr,
         uint256 _totemTokenAmount
-    ) external whenSalePeriod(_totemTokenAddr) {
+    ) external {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
+        if (!totems[_totemTokenAddr].isSalePeriod) revert OnlyInSalePeriod();
         if (
             // check if contract has enough totem tokens + initial pool supply
             IERC20(_totemTokenAddr).balanceOf(address(this)) <
             _totemTokenAmount + POOL_INITIAL_SUPPLY ||
             // check if user has no more than maxTokensPerAddress
             IERC20(_totemTokenAddr).balanceOf(msg.sender) + _totemTokenAmount >
-            maxTokensPerAddress
+            maxTokensPerAddress ||
+            _totemTokenAmount == 0
         ) revert WrongAmount(_totemTokenAmount);
 
         uint256 paymentTokenAmount = totemsToPaymentToken(
@@ -218,7 +215,8 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     function sell(
         address _totemTokenAddr,
         uint256 _totemTokenAmount
-    ) external whenSalePeriod(_totemTokenAddr) {
+    ) external {
+        if (!totems[_totemTokenAddr].isSalePeriod) revert OnlyInSalePeriod();
         SalePosInToken storage position = salePositions[msg.sender][
             _totemTokenAddr
         ];
@@ -320,7 +318,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             liquidity
         );
     }
-event Debug();
+
     /**
      * @notice Adds liquidity to a Uniswap V2 pool
      * @dev Approves tokens for the router and adds liquidity to the pool
@@ -372,8 +370,6 @@ event Debug();
             address(this), // Send LP tokens to this contract
             block.timestamp + 600 // Deadline: 10 minutes from now
         );
-
-        emit Debug();
 
         return (liquidity, liquidityToken);
     }
@@ -522,5 +518,14 @@ event Debug();
         
         // Return the minimum of remaining allowance and available tokens
         return remainingAllowance < availableForSale ? remainingAllowance : availableForSale;
+    }
+
+    /**
+     * @notice Returns the TotemData for a specific totem token address
+     * @param _totemTokenAddr Address of the totem token
+     * @return TotemData struct containing information about the totem
+     */
+    function getTotemData(address _totemTokenAddr) external view returns (TotemData memory) {
+        return totems[_totemTokenAddr];
     }
 }

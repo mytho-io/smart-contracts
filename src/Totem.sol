@@ -29,6 +29,9 @@ contract Totem is AccessControlUpgradeable {
     address private treasuryAddr;
     address private totemDistributorAddr;
     address private meritManagerAddr;
+    
+    address public owner;
+    address[] public collaborators;
 
     bool private isCustomToken;
     bool public salePeriodEnded;
@@ -60,17 +63,18 @@ contract Totem is AccessControlUpgradeable {
      * @param _dataHash The data hash associated with this Totem
      * @param _registryAddr Address of the AddressRegistry contract
      * @param _isCustomToken Flag indicating if the token is custom (not burnable)
+     * @param _owner The address of the Totem owner
+     * @param _collaborators Array of collaborator addresses
      */
     function initialize(
         TotemToken _totemToken,
         bytes memory _dataHash,
         address _registryAddr,
-        bool _isCustomToken
+        bool _isCustomToken,
+        address _owner,
+        address[] memory _collaborators
     ) public initializer {
         __AccessControl_init();
-        
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(MANAGER, msg.sender);
 
         totemToken = _totemToken;
         dataHash = _dataHash;
@@ -82,6 +86,10 @@ contract Totem is AccessControlUpgradeable {
         
         isCustomToken = _isCustomToken;
         salePeriodEnded = false; // Initially, sale period is active
+
+        // Set owner and collaborators
+        owner = _owner;
+        collaborators = _collaborators;
 
         _grantRole(TOTEM_DISTRIBUTOR, totemDistributorAddr);
     }
