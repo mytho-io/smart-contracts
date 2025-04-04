@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {TotemFactory} from "./TotemFactory.sol";
 import {TotemToken} from "./TotemToken.sol";
@@ -28,6 +29,7 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 
 contract TotemTokenDistributor is AccessControlUpgradeable {
     using EnumerableSet for EnumerableSet.AddressSet;
+    using SafeERC20 for IERC20;
 
     TotemFactory private factory;
     MeritManager private meritManager;
@@ -35,6 +37,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     uint256 public maxTokensPerAddress;
     uint256 private oneTotemPriceInUsd;
+
+    // Maximum age of price feed data before it's considered stale (1 hour)
+    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours;
 
     // contract address for revenue in payment tokens
     address private treasuryAddr;
@@ -57,12 +62,13 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
-    uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
-    uint256 private constant REVENUE_PAYMENT_TOKEN_SHARE = 250; // 2.5%
-    uint256 private constant TOTEM_CREATOR_PAYMENT_TOKEN_SHARE = 50; // 0.5%
-    uint256 private constant POOL_PAYMENT_TOKEN_SHARE = 2857; // 28.57%
-    uint256 private constant VAULT_PAYMENT_TOKEN_SHARE = 6843; // 68.43%
+    // Default percentage shares for distribution - can be made configurable
+    uint256 public revenuePaymentTokenShare;
+    uint256 public totemCreatorPaymentTokenShare;
+    uint256 public poolPaymentTokenShare;
+    uint256 public vaultPaymentTokenShare;
     uint256 private constant PRECISION = 10000;
+    uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
 
     struct TotemData {
         address totemAddr;
@@ -85,19 +91,36 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address buyer,
         address paymentTokenAddr,
         address totemTokenAddr,
-        uint256 totemTokenAmount
+        uint256 totemTokenAmount,
+        uint256 paymentTokenAmount
     );
     event TotemTokensSold(
         address buyer,
         address paymentTokenAddr,
         address totemTokenAddr,
-        uint256 totemTokenAmount
+        uint256 totemTokenAmount,
+        uint256 paymentTokenAmount
     );
     event TotemRegistered(
         address totemAddr,
         address creator,
         address totemTokenAddr
     );
+    event SalePeriodClosed(address totemTokenAddr, uint256 totalCollected);
+    event LiquidityAdded(
+        address totemTokenAddr,
+        address paymentTokenAddr,
+        uint256 totemAmount,
+        uint256 paymentAmount,
+        uint256 liquidity
+    );
+    event TokenDistributionSharesUpdated(
+        uint256 revenueShare,
+        uint256 creatorShare,
+        uint256 poolShare,
+        uint256 vaultShare
+    );
+    event PriceFeedSet(address tokenAddr, address priceFeedAddr);
 
     // Custom errors
     error AlreadyRegistered(address totemTokenAddr);
@@ -106,25 +129,47 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     error WrongAmount(uint256 tokenAmount);
     error NotPaymentToken(address tokenAddr);
     error OnlyInSalePeriod();
-    error NotAllowedInSalePeriod();
+    error SalePeriodAlreadyEnded();
     error WrongPaymentTokenAmount(uint256 paymentTokenAmount);
     error OnlyForTotem();
     error AlreadySet();
+    error OnlyFactory();
+    error ZeroAddress();
+    error InvalidShares();
+    error NoPriceFeedSet(address tokenAddr);
+    error InvalidPrice(address tokenAddr);
+    error StalePrice(address tokenAddr);
+    error LiquidityAdditionFailed();
+    error UniswapRouterNotSet();
 
     function initialize(address _registryAddr) public initializer {
+        __AccessControl_init();
+
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
 
-        mytho = IERC20(AddressRegistry(_registryAddr).getMythoToken());
-        treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
-        meritManager = MeritManager(AddressRegistry(_registryAddr).getMeritManager());
+        if (_registryAddr == address(0)) revert ZeroAddress();
+
+        AddressRegistry registry = AddressRegistry(_registryAddr);
+        mytho = IERC20(registry.getMythoToken());
+        treasuryAddr = registry.getMythoTreasury();
+        meritManager = MeritManager(registry.getMeritManager());
 
         maxTokensPerAddress = 5_000_000 ether;
         oneTotemPriceInUsd = 0.00004 ether;
+
+        // Initialize distribution shares
+        revenuePaymentTokenShare = 250; // 2.5%
+        totemCreatorPaymentTokenShare = 50; // 0.5%
+        poolPaymentTokenShare = 2857; // 28.57%
+        vaultPaymentTokenShare = 6843; // 68.43%
     }
 
     /// @notice Being called by TotemFactory during totem creation
     function register() external {
+        if (address(factory) == address(0)) revert AlreadySet();
+        if (msg.sender != address(factory)) revert OnlyFactory();
+
         // get info about the totem being created
         TotemFactory.TotemData memory totemDataFromFactory = factory
             .getTotemData(factory.getLastId() - 1);
@@ -133,6 +178,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             revert NotAllowedForCustomTokens();
         if (totems[totemDataFromFactory.totemTokenAddr].registered)
             revert AlreadyRegistered(totemDataFromFactory.totemTokenAddr);
+        if (paymentTokenAddr == address(0)) revert ZeroAddress();
 
         totems[totemDataFromFactory.totemTokenAddr] = TotemData(
             totemDataFromFactory.totemAddr,
@@ -155,13 +201,11 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     }
 
     /// @notice Buy totems for allowed payment tokens
-    function buy(
-        address _totemTokenAddr,
-        uint256 _totemTokenAmount
-    ) external {
+    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
-        if (!totems[_totemTokenAddr].isSalePeriod) revert OnlyInSalePeriod();
+        if (!totems[_totemTokenAddr].isSalePeriod)
+            revert SalePeriodAlreadyEnded();
         if (
             // check if contract has enough totem tokens + initial pool supply
             IERC20(_totemTokenAddr).balanceOf(address(this)) <
@@ -171,6 +215,8 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             maxTokensPerAddress ||
             _totemTokenAmount == 0
         ) revert WrongAmount(_totemTokenAmount);
+
+        if (paymentTokenAddr == address(0)) revert ZeroAddress();
 
         uint256 paymentTokenAmount = totemsToPaymentToken(
             paymentTokenAddr,
@@ -191,32 +237,38 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         position.paymentTokenAmount += paymentTokenAmount;
         position.totemTokenAmount += _totemTokenAmount;
 
-        IERC20(paymentTokenAddr).transferFrom(
+        // Transfer tokens using SafeERC20
+        IERC20(paymentTokenAddr).safeTransferFrom(
             msg.sender,
             address(this),
             paymentTokenAmount
         );
-        IERC20(_totemTokenAddr).transfer(msg.sender, _totemTokenAmount);        
+        IERC20(_totemTokenAddr).safeTransfer(msg.sender, _totemTokenAmount);
 
         emit TotemTokensBought(
             msg.sender,
             paymentTokenAddr,
             _totemTokenAddr,
-            _totemTokenAmount
+            _totemTokenAmount,
+            paymentTokenAmount
         );
 
         // close sale period when the remaining tokens are exactly what's needed for the pool
-        if (IERC20(_totemTokenAddr).balanceOf(address(this)) == POOL_INITIAL_SUPPLY) {
+        if (
+            IERC20(_totemTokenAddr).balanceOf(address(this)) ==
+            POOL_INITIAL_SUPPLY
+        ) {
             _closeSalePeriod(_totemTokenAddr);
         }
     }
 
     /// @notice Sell totems for used payment token in sale period
-    function sell(
-        address _totemTokenAddr,
-        uint256 _totemTokenAmount
-    ) external {
-        if (!totems[_totemTokenAddr].isSalePeriod) revert OnlyInSalePeriod();
+    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+        if (!totems[_totemTokenAddr].registered)
+            revert UnknownTotemToken(_totemTokenAddr);
+        if (!totems[_totemTokenAddr].isSalePeriod)
+            revert SalePeriodAlreadyEnded();
+
         SalePosInToken storage position = salePositions[msg.sender][
             _totemTokenAddr
         ];
@@ -230,7 +282,6 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         ) revert WrongAmount(_totemTokenAmount);
 
         // calculate the right number of payment tokens according to _totemTokenAmount share in sale position
-        /// @custom:check for correct calculation
         uint256 paymentTokensBack = (position.paymentTokenAmount *
             _totemTokenAmount) / position.totemTokenAmount;
 
@@ -241,19 +292,20 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         position.totemTokenAmount -= _totemTokenAmount;
         position.paymentTokenAmount -= paymentTokensBack;
 
-        // send payment tokens and take totem tokens
-        IERC20(_totemTokenAddr).transferFrom(
+        // send payment tokens and take totem tokens using SafeERC20
+        IERC20(_totemTokenAddr).safeTransferFrom(
             msg.sender,
             address(this),
             _totemTokenAmount
         );
-        IERC20(_paymentTokenAddr).transfer(msg.sender, paymentTokensBack);
+        IERC20(_paymentTokenAddr).safeTransfer(msg.sender, paymentTokensBack);
 
         emit TotemTokensSold(
             msg.sender,
             _paymentTokenAddr,
             _totemTokenAddr,
-            _totemTokenAmount
+            _totemTokenAmount,
+            paymentTokensBack
         );
     }
 
@@ -269,34 +321,34 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         // register totem in MeritManager and activate merit distribution for it
         meritManager.register(totems[_totemTokenAddr].totemAddr);
 
-        // distrubute collected payment tokens
+        // distribute collected payment tokens
         uint256 paymentTokenAmount = totems[_totemTokenAddr]
             .collectedPaymentTokens;
         address _paymentTokenAddr = totems[_totemTokenAddr].paymentToken;
 
         // calculate revenue share
-        uint256 revenueShare = (paymentTokenAmount *
-            REVENUE_PAYMENT_TOKEN_SHARE) / PRECISION;
-        IERC20(_paymentTokenAddr).transfer(treasuryAddr, revenueShare);
+        uint256 revenueShare = (paymentTokenAmount * revenuePaymentTokenShare) /
+            PRECISION;
+        IERC20(_paymentTokenAddr).safeTransfer(treasuryAddr, revenueShare);
 
         // calculate totem creator share
         uint256 creatorShare = (paymentTokenAmount *
-            TOTEM_CREATOR_PAYMENT_TOKEN_SHARE) / PRECISION;
-        IERC20(_paymentTokenAddr).transfer(
+            totemCreatorPaymentTokenShare) / PRECISION;
+        IERC20(_paymentTokenAddr).safeTransfer(
             totems[_totemTokenAddr].creator,
             creatorShare
         );
 
         // calculate totem vault share
-        uint256 vaultShare = (paymentTokenAmount * VAULT_PAYMENT_TOKEN_SHARE) /
+        uint256 vaultShare = (paymentTokenAmount * vaultPaymentTokenShare) /
             PRECISION;
-        IERC20(_paymentTokenAddr).transfer(
+        IERC20(_paymentTokenAddr).safeTransfer(
             totems[_totemTokenAddr].totemAddr,
             vaultShare
         );
 
         // calculate totem pool share
-        uint256 poolShare = (paymentTokenAmount * POOL_PAYMENT_TOKEN_SHARE) /
+        uint256 poolShare = (paymentTokenAmount * poolPaymentTokenShare) /
             PRECISION;
 
         // send liquidity to AMM and relay LP tokens to Totem
@@ -313,10 +365,12 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             IERC20(liquidityToken)
         );
 
-        IERC20(liquidityToken).transfer(
+        IERC20(liquidityToken).safeTransfer(
             totems[_totemTokenAddr].totemAddr,
             liquidity
         );
+
+        emit SalePeriodClosed(_totemTokenAddr, paymentTokenAmount);
     }
 
     /**
@@ -335,7 +389,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         uint256 _totemTokenAmount,
         uint256 _paymentTokenAmount
     ) internal returns (uint256 liquidity, address liquidityToken) {
-        if (uniswapV2RouterAddr == address(0)) revert("Uniswap router not set");
+        if (uniswapV2RouterAddr == address(0)) revert UniswapRouterNotSet();
 
         IUniswapV2Router02 router = IUniswapV2Router02(uniswapV2RouterAddr);
 
@@ -352,7 +406,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             );
         }
 
-        // Approve tokens for the router
+        // Approve tokens for the uni router
         IERC20(_totemTokenAddr).approve(uniswapV2RouterAddr, _totemTokenAmount);
         IERC20(_paymentTokenAddr).approve(
             uniswapV2RouterAddr,
@@ -365,10 +419,20 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
             _paymentTokenAddr,
             _totemTokenAmount,
             _paymentTokenAmount,
-            0, // Accept any amount of token A
-            0, // Accept any amount of token B
-            address(this), // Send LP tokens to this contract
+            (_totemTokenAmount * 995) / 1000, // 0.5% slippage
+            (_paymentTokenAmount * 995) / 1000, // 0.5% slippage
+            address(this),
             block.timestamp + 600 // Deadline: 10 minutes from now
+        );
+
+        if (liquidity == 0) revert LiquidityAdditionFailed();
+
+        emit LiquidityAdded(
+            _totemTokenAddr,
+            _paymentTokenAddr,
+            _totemTokenAmount,
+            _paymentTokenAmount,
+            liquidity
         );
 
         return (liquidity, liquidityToken);
@@ -379,17 +443,22 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     function setPaymentToken(
         address _paymentTokenAddr
     ) external onlyRole(MANAGER) {
+        if (_paymentTokenAddr == address(0)) revert ZeroAddress();
         paymentTokenAddr = _paymentTokenAddr;
     }
 
     function setTotemFactory(address _registryAddr) external onlyRole(MANAGER) {
         if (address(factory) != address(0)) revert AlreadySet();
-        factory = TotemFactory(AddressRegistry(_registryAddr).getTotemFactory());
+        if (_registryAddr == address(0)) revert ZeroAddress();
+        factory = TotemFactory(
+            AddressRegistry(_registryAddr).getTotemFactory()
+        );
     }
 
     function setMaxTotemTokensPerAddress(
         uint256 _amount
     ) external onlyRole(MANAGER) {
+        if (_amount == 0) revert WrongAmount(0);
         maxTokensPerAddress = _amount;
     }
 
@@ -400,6 +469,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     function setUniswapV2Router(
         address _routerAddr
     ) external onlyRole(MANAGER) {
+        if (_routerAddr == address(0)) revert ZeroAddress();
         uniswapV2RouterAddr = _routerAddr;
     }
 
@@ -412,11 +482,62 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _tokenAddr,
         address _priceFeedAddr
     ) external onlyRole(MANAGER) {
+        if (_tokenAddr == address(0) || _priceFeedAddr == address(0))
+            revert ZeroAddress();
         priceFeedAddresses[_tokenAddr] = _priceFeedAddr;
+        emit PriceFeedSet(_tokenAddr, _priceFeedAddr);
+    }
+
+    /**
+     * @notice Sets the distribution shares for payment tokens
+     * @param _revenueShare Percentage going to treasury (multiplied by PRECISION)
+     * @param _creatorShare Percentage going to totem creator (multiplied by PRECISION)
+     * @param _poolShare Percentage going to liquidity pool (multiplied by PRECISION)
+     * @param _vaultShare Percentage going to totem vault (multiplied by PRECISION)
+     */
+    function setDistributionShares(
+        uint256 _revenueShare,
+        uint256 _creatorShare,
+        uint256 _poolShare,
+        uint256 _vaultShare
+    ) external onlyRole(MANAGER) {
+        if (
+            _revenueShare + _creatorShare + _poolShare + _vaultShare !=
+            PRECISION
+        ) revert InvalidShares();
+
+        revenuePaymentTokenShare = _revenueShare;
+        totemCreatorPaymentTokenShare = _creatorShare;
+        poolPaymentTokenShare = _poolShare;
+        vaultPaymentTokenShare = _vaultShare;
+
+        emit TokenDistributionSharesUpdated(
+            _revenueShare,
+            _creatorShare,
+            _poolShare,
+            _vaultShare
+        );
+    }
+
+    /**
+     * @notice Sets the token price in USD
+     * @param _priceInUsd New price in USD (18 decimals)
+     */
+    function setTotemPriceInUsd(
+        uint256 _priceInUsd
+    ) external onlyRole(MANAGER) {
+        if (_priceInUsd == 0) revert WrongAmount(0);
+        oneTotemPriceInUsd = _priceInUsd;
     }
 
     /// READERS
 
+    /**
+     * @notice Converts totem tokens to payment tokens based on price
+     * @param _tokenAddr Address of the payment token
+     * @param _totemsAmount Amount of totem tokens
+     * @return Amount of payment tokens required
+     */
     function totemsToPaymentToken(
         address _tokenAddr,
         uint256 _totemsAmount
@@ -424,6 +545,12 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         return (_totemsAmount * oneTotemPriceInUsd) / getPrice(_tokenAddr);
     }
 
+    /**
+     * @notice Converts payment tokens to totem tokens based on price
+     * @param _tokenAddr Address of the payment token
+     * @param _paymentTokenAmount Amount of payment tokens
+     * @return Amount of totem tokens that can be purchased
+     */
     function paymentTokenToTotems(
         address _tokenAddr,
         uint256 _paymentTokenAmount
@@ -444,16 +571,24 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         if (priceFeedAddr == address(0)) {
             // If no price feed is set for this token, return a default value
             return 0.05 * 1e18;
+            // revert NoPriceFeedSet(_tokenAddr);
         }
 
         // Get the latest price from Chainlink
         AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddr);
-        (, int256 price, , , ) = priceFeed.latestRoundData();
+        (
+            uint80 roundId,
+            int256 price,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = priceFeed.latestRoundData();
 
-        if (price <= 0) {
-            // If price is invalid, return a default value
-            return 0.05 * 1e18;
-        }
+        // Validate the price feed data
+        if (price <= 0) revert InvalidPrice(_tokenAddr);
+        if (answeredInRound < roundId) revert StalePrice(_tokenAddr);
+        if (block.timestamp > updatedAt + PRICE_FEED_STALE_THRESHOLD)
+            revert StalePrice(_tokenAddr);
 
         // Get the number of decimals in the price feed
         uint8 decimals = priceFeed.decimals();
@@ -475,15 +610,25 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         return (1e36) / normalizedPrice;
     }
 
+    /**
+     * @notice Returns the address of the current payment token
+     * @return Address of the payment token
+     */
     function getPaymentToken() external view returns (address) {
         return paymentTokenAddr;
     }
 
+    /**
+     * @notice Returns the sale position of a user for a specific totem token
+     * @param _userAddr Address of the user
+     * @param _totemTokenAddr Address of the totem token
+     * @return Sale position details
+     */
     function getPosition(
-        address _addr,
+        address _userAddr,
         address _totemTokenAddr
     ) external view returns (SalePosInToken memory) {
-        return salePositions[_addr][_totemTokenAddr];
+        return salePositions[_userAddr][_totemTokenAddr];
     }
 
     /**
@@ -497,27 +642,36 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _userAddr,
         address _totemTokenAddr
     ) external view returns (uint256) {
-        if (!totems[_totemTokenAddr].registered || !totems[_totemTokenAddr].isSalePeriod) {
+        if (
+            !totems[_totemTokenAddr].registered ||
+            !totems[_totemTokenAddr].isSalePeriod
+        ) {
             return 0; // Tokens are only available for purchase during sale period
         }
 
         // Get user's current balance
         uint256 currentBalance = IERC20(_totemTokenAddr).balanceOf(_userAddr);
-        
+
         // Calculate how many more tokens the user can buy based on the max limit
         if (currentBalance >= maxTokensPerAddress) {
             return 0; // User has reached the maximum allowed tokens
         }
-        
+
         uint256 remainingAllowance = maxTokensPerAddress - currentBalance;
-        
+
         // Check contract's available balance (excluding pool initial supply)
-        uint256 contractBalance = IERC20(_totemTokenAddr).balanceOf(address(this));
-        uint256 availableForSale = contractBalance > POOL_INITIAL_SUPPLY ? 
-                                  contractBalance - POOL_INITIAL_SUPPLY : 0;
-        
+        uint256 contractBalance = IERC20(_totemTokenAddr).balanceOf(
+            address(this)
+        );
+        uint256 availableForSale = contractBalance > POOL_INITIAL_SUPPLY
+            ? contractBalance - POOL_INITIAL_SUPPLY
+            : 0;
+
         // Return the minimum of remaining allowance and available tokens
-        return remainingAllowance < availableForSale ? remainingAllowance : availableForSale;
+        return
+            remainingAllowance < availableForSale
+                ? remainingAllowance
+                : availableForSale;
     }
 
     /**
@@ -525,7 +679,25 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      * @param _totemTokenAddr Address of the totem token
      * @return TotemData struct containing information about the totem
      */
-    function getTotemData(address _totemTokenAddr) external view returns (TotemData memory) {
+    function getTotemData(
+        address _totemTokenAddr
+    ) external view returns (TotemData memory) {
         return totems[_totemTokenAddr];
+    }
+
+    /**
+     * @notice Returns the current distribution shares
+     */
+    function getDistributionShares()
+        external
+        view
+        returns (uint256 revenue, uint256 creator, uint256 pool, uint256 vault)
+    {
+        return (
+            revenuePaymentTokenShare,
+            totemCreatorPaymentTokenShare,
+            poolPaymentTokenShare,
+            vaultPaymentTokenShare
+        );
     }
 }
