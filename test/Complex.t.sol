@@ -132,7 +132,8 @@ contract ComplexTest is Test {
         vm.expectRevert();
         factory.createTotemWithExistingToken(
             "customDataHash",
-            address(customToken)
+            address(customToken),
+            new address[](0)
         );
 
         astrToken.approve(address(factory), factory.getCreationFee());
@@ -144,7 +145,8 @@ contract ComplexTest is Test {
         );
         factory.createTotemWithExistingToken(
             "customDataHash",
-            address(customToken)
+            address(customToken),
+            new address[](0)
         );
 
         prank(deployer);
@@ -156,7 +158,8 @@ contract ComplexTest is Test {
         prank(userA);
         factory.createTotemWithExistingToken(
             "customDataHash",
-            address(customToken)
+            address(customToken),
+            new address[](0)
         );
 
         TF.TotemData memory data = factory.getTotemData(0);
@@ -189,7 +192,7 @@ contract ComplexTest is Test {
     function _createTotem(address _totemCreator) internal returns (address) {
         prank(_totemCreator);
         astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotem("dataHash", "TotemToken", "TT");
+        factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
         TF.TotemData memory totemData = factory.getTotemData(
             factory.getLastId() - 1
         );
@@ -786,13 +789,13 @@ contract ComplexTest is Test {
                 "Empty token name or symbol"
             )
         );
-        factory.createTotem("", "", "");
+        factory.createTotem("", "", "", new address[](0));
 
         // Test creating totem with insufficient fee
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee() - 1);
         vm.expectRevert();
-        factory.createTotem("dataHash", "Token", "TKN");
+        factory.createTotem("dataHash", "Token", "TKN", new address[](0));
 
         // Test creating totem with custom token not whitelisted
         MockToken customToken = new MockToken();
@@ -804,7 +807,7 @@ contract ComplexTest is Test {
                 address(customToken)
             )
         );
-        factory.createTotemWithExistingToken("dataHash", address(customToken));
+        factory.createTotemWithExistingToken("dataHash", address(customToken), new address[](0));
 
         // Test getting non-existent totem data
         vm.expectRevert(abi.encodeWithSelector(TF.TotemNotFound.selector, 999));
@@ -1082,13 +1085,13 @@ contract ComplexTest is Test {
             factory.getCreationFee()
         );
         vm.expectRevert();
-        factory.createTotem("dataHash", "TotemToken", "TT");
+        factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
 
         prank(deployer);
         factory.unpause();
 
         prank(userA);
-        factory.createTotem("dataHash", "TotemToken", "TT");
+        factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
         assertEq(factory.getLastId(), 1);
     }
 

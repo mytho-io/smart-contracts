@@ -116,7 +116,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function createTotem(
         bytes memory _dataHash,
         string memory _tokenName,
-        string memory _tokenSymbol
+        string memory _tokenSymbol,
+        address[] memory _collaborators
     ) public whenNotPaused {
         if (
             bytes(_tokenName).length == 0 ||
@@ -144,7 +145,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
                 registryAddr,
                 false,
                 msg.sender,
-                new address[](0)
+                _collaborators
             )
         );
 
@@ -169,7 +170,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      */
     function createTotemWithExistingToken(
         bytes memory _dataHash,
-        address _tokenAddr
+        address _tokenAddr,
+        address[] memory _collaborators
     ) public whenNotPaused {
         if (_dataHash.length == 0) {
             revert InvalidTotemParameters("Empty dataHash");
@@ -190,7 +192,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
                 registryAddr,
                 true,
                 msg.sender,
-                new address[](0)
+                _collaborators
             )
         );
 

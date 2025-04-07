@@ -53,7 +53,6 @@ contract Do is Script {
 
     MYTHO mytho;
     MockToken paymentToken;
-    MockToken astrToken;
 
     // uni
     IUniswapV2Factory uniFactory;
@@ -69,6 +68,8 @@ contract Do is Script {
     address deployer;
     address user;
 
+    address astrToken;
+
     function setUp() public {
         minato = vm.createFork(MINATO_RPC_URL);
         deployer = vm.addr(deployerPk);
@@ -82,15 +83,24 @@ contract Do is Script {
         treasury = Treasury(payable(0x8006aa62c46Fc731f3B1389AA0fF0d3f07d4d7f5));
         registry = AddressRegistry(0x5FFA0E0302E28f937B705D5e3CF7FbA453CD3eC0);
         mytho = MYTHO(0x3e75e4991E4DeEcC2338577A125A560c490d6Da7);
+
+        astrToken = 0x26e6f7c7047252DdE3dcBF26AA492e6a264Db655;
     }
 
     function run() public {
         fork(minato);
 
-        distr.setPriceFeed(
-            0x26e6f7c7047252DdE3dcBF26AA492e6a264Db655, // ASTR token
-            0x1e13086Ca715865e4d89b280e3BB6371dD48DabA // ASTR/USD price feed
-        );
+        ERC20(astrToken).approve(address(factory), type(uint256).max);
+        ERC20(astrToken).approve(address(distr), type(uint256).max);
+
+        // factory.setFeeToken(astrToken);
+        // distr.setPaymentToken(address(astrToken));
+
+        // factory.setCreationFee(0.001 ether);
+
+        // // test value
+        // distr.setMaxTotemTokensPerAddress(1_000_000_000 ether);
+        // distr.setTotemPriceInUsd(1000);
     }
 
     function fork(uint256 _forkId) internal {
