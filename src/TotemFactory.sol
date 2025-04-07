@@ -144,7 +144,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
                 registryAddr,
                 false,
                 msg.sender,
-                new address[](0) // Empty collaborators array for now
+                new address[](0)
             )
         );
 
@@ -190,7 +190,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
                 registryAddr,
                 true,
                 msg.sender,
-                new address[](0) // Empty collaborators array for now
+                new address[](0)
             )
         );
 

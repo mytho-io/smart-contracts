@@ -3,6 +3,11 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+fs_permissions = [
+    { access = "read", path = "./src" },
+    { access = "read-write", path = "./combined" },
+    { access = "read-write", path = "./out" } 
+]
 
 unchecked_cheatcode_artifacts = true
 

@@ -9,6 +9,7 @@ import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {AddressRegistry} from "./AddressRegistry.sol";
+import {Totem} from "./Totem.sol";
 
 /**
  * @title MeritManager
@@ -83,6 +84,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error InvalidPeriod();
     error TransferFailed();
     error InvalidAddress();
+    error InsufficientTotemBalance();
 
     /**
      * @dev Initializes the contract with required parameters
@@ -167,6 +169,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
         if (!isMythum()) revert NotInMythumPeriod();
+
+        // Get the totem token address and check if the user has it
+        (address totemTokenAddr,,) = Totem(_totemAddr).getTokenAddresses();
+        if (IERC20(totemTokenAddr).balanceOf(msg.sender) == 0) revert InsufficientTotemBalance();
 
         uint256 currentPeriod_ = currentPeriod();
 

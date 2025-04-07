@@ -851,6 +851,37 @@ contract ComplexTest is Test {
         assertEq(treasury.getNativeBalance(), 1 ether);
     }
 
+    // Test boostTotem with insufficient totem token balance
+    function test_BoostTotem_InsufficientTotemBalance() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        
+        // End sale period to allow transfers
+        _buyAllTotemTokens(totemTokenAddr);
+        
+        // Warp to Mythus period (last 25% of period)
+        warp(23 days);
+        
+        // User B has no totem tokens, should fail with InsufficientTotemBalance
+        vm.deal(userB, 1 ether); // Provide ETH for boost fee
+        prank(userB);
+        vm.expectRevert(MM.InsufficientTotemBalance.selector);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Transfer some tokens to userB
+        prank(userA);
+        IERC20(totemTokenAddr).transfer(userB, 100 ether);
+        
+        // Now userB has tokens and should be able to boost
+        prank(userB);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Verify the boost was successful
+        uint256 period = mm.currentPeriod();
+        assertTrue(mm.hasUserBoostedInPeriod(userB, period));
+        assertEq(mm.getUserBoostedTotem(userB, period), data.totemAddr);
+    }
+
     // Test Totem token burning error cases
     function test_TotemBurningErrorCases() public {
         address totemTokenAddr = _createTotem(userA);

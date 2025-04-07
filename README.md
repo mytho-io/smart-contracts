@@ -26,23 +26,31 @@ The **MYTHO Ecosystem** is a decentralized platform on Ethereum that integrates 
 | `TotemTokenDistributor.sol` | Handles token sales and liquidity provision.                              |
 | `Totem.sol`              | Manages individual totems, burning, and MYTHO claims.                       |
 | `TotemToken.sol`         | ERC20 token for totems with sale restrictions.                              |
-| `RevenuePool.sol`        | Collects fees from creation and sales.                                      |
+| `Treasury.sol`           | Manages and withdraws ERC20 and native tokens.                              |
+| `AddressRegistry.sol`    | Central registry for storing and retrieving contract addresses.             |
 
 ## Structure
 
 ```bash
 mytho/
 ├── src/                    # Smart contracts
+│   ├── AddressRegistry.sol
 │   ├── MeritManager.sol
-│   ├── TotemFactory.sol
-│   ├── TotemTokenDistributor.sol
-│   ├── Totem.sol
-│   ├── TotemToken.sol
 │   ├── MYTHO.sol
-│   └── RevenuePool.sol
+│   ├── Totem.sol
+│   ├── TotemFactory.sol
+│   ├── TotemToken.sol
+│   ├── TotemTokenDistributor.sol
+│   ├── Treasury.sol
+│   └── interfaces/         # Interface definitions
 ├── test/                   # Test files
-│   └── ComplexTest.sol
-├── script/                 # Deployment scripts (to be added)
+│   ├── Complex.t.sol
+│   ├── mocks/              # Mock contracts for testing
+│   └── util/               # Testing utilities
+├── script/                 # Deployment scripts
+│   ├── Deploy.s.sol
+│   └── Do.s.sol
+├── combined/               # Combined contracts for verification
 ├── foundry.toml            # Foundry configuration
 └── README.md               # This file
 ```
