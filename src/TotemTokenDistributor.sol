@@ -542,7 +542,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _tokenAddr,
         uint256 _totemsAmount
     ) public view returns (uint256) {
-        return (_totemsAmount * oneTotemPriceInUsd) / getPrice(_tokenAddr);
+        uint256 amount = (_totemsAmount * oneTotemPriceInUsd) /
+            getPrice(_tokenAddr);
+        return amount == 0 ? 1 : amount;
     }
 
     /**
@@ -555,8 +557,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _tokenAddr,
         uint256 _paymentTokenAmount
     ) public view returns (uint256) {
-        return
-            (_paymentTokenAmount * getPrice(_tokenAddr)) / oneTotemPriceInUsd;
+        uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr)) /
+            oneTotemPriceInUsd;
+        return amount == 0 ? 1 : amount;
     }
 
     /**
@@ -569,8 +572,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address priceFeedAddr = priceFeedAddresses[_tokenAddr];
 
         if (priceFeedAddr == address(0)) {
-            // If no price feed is set for this token, return a default value
+            // If no price feed is set for this token, return a default value. For test purposes
             return 0.05 * 1e18;
+
             // revert NoPriceFeedSet(_tokenAddr);
         }
 
