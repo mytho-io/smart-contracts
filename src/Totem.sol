@@ -10,6 +10,8 @@ import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 import {TotemToken} from "./TotemToken.sol";
 
+import "forge-std/Test.sol";
+
 /**
  * @title Totem
  * @notice This contract represents a Totem in the MYTHO ecosystem, managing token burning and merit distribution
@@ -29,14 +31,13 @@ contract Totem is AccessControlUpgradeable {
     address private treasuryAddr;
     address private totemDistributorAddr;
     address private meritManagerAddr;
-    
+
     address public owner;
     address[] public collaborators;
 
     bool private isCustomToken;
     bool public salePeriodEnded;
 
-    bytes32 private constant MANAGER = keccak256("MANAGER");
     bytes32 private constant TOTEM_DISTRIBUTOR = keccak256("TOTEM_DISTRIBUTOR");
 
     // Events
@@ -53,8 +54,10 @@ contract Totem is AccessControlUpgradeable {
     // Custom errors
     error SalePeriodNotEnded();
     error InsufficientTotemBalance();
-    error InsufficientPaymentTokenBalance();
+    error NothingToDistribute();
     error ZeroAmount();
+    error ZeroCirculatingSupply();
+    error InvalidParams();
 
     /**
      * @notice Initializes the Totem contract with token addresses, data hash, and revenue pool
@@ -74,16 +77,24 @@ contract Totem is AccessControlUpgradeable {
         address _owner,
         address[] memory _collaborators
     ) public initializer {
+        if (
+            address(_totemToken) == address(0) ||
+            _registryAddr == address(0) ||
+            _owner == address(0) ||
+            _dataHash.length == 0
+        ) revert InvalidParams();
+
         __AccessControl_init();
 
         totemToken = _totemToken;
         dataHash = _dataHash;
 
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
-        totemDistributorAddr = AddressRegistry(_registryAddr).getTotemTokenDistributor();
+        totemDistributorAddr = AddressRegistry(_registryAddr)
+            .getTotemTokenDistributor();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         mythoToken = IERC20(MeritManager(meritManagerAddr).mythoToken());
-        
+
         isCustomToken = _isCustomToken;
         salePeriodEnded = false; // Initially, sale period is active
 
@@ -91,34 +102,58 @@ contract Totem is AccessControlUpgradeable {
         owner = _owner;
         collaborators = _collaborators;
 
+        if (_isCustomToken) {
+            paymentToken = IERC20(
+                TotemTokenDistributor(totemDistributorAddr).getPaymentToken()
+            );
+        }
+
         _grantRole(TOTEM_DISTRIBUTOR, totemDistributorAddr);
     }
 
     /**
      * @notice Allows TotemToken holders to burn or transfer their tokens and receive proportional shares of assets
      * @dev After the sale period ends, burns TotemTokens for standard tokens or transfers custom tokens to treasuryAddr.
-     *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens.
+     *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens based on circulating supply.
      * @param _totemTokenAmount The amount of TotemToken to burn or transfer
      */
     function burnTotemTokens(uint256 _totemTokenAmount) external {
-        if (!salePeriodEnded) revert SalePeriodNotEnded();
+        if (!isCustomToken && !salePeriodEnded) revert SalePeriodNotEnded();
         if (totemToken.balanceOf(msg.sender) < _totemTokenAmount)
             revert InsufficientTotemBalance();
         if (_totemTokenAmount == 0) revert ZeroAmount();
 
-        // Get the total supply of TotemToken
-        uint256 totalSupply = totemToken.totalSupply();
+        // Get the circulating supply using the dedicated function
+        uint256 circulatingSupply = getCirculatingSupply();
+        if (circulatingSupply == 0) revert ZeroCirculatingSupply();
 
-        // Calculate the user's share of payment tokens based on their submitted amount
-        uint256 paymentTokenBalance = paymentToken.balanceOf(address(this));
+        // Check balances of all token types
+        uint256 paymentTokenBalance = address(paymentToken) != address(0)
+            ? paymentToken.balanceOf(address(this))
+            : 0;
+        uint256 mythoBalance = mythoToken.balanceOf(address(this));
+        uint256 lpBalance = address(liquidityToken) != address(0)
+            ? liquidityToken.balanceOf(address(this))
+            : 0;
+
+        // Check if all balances are zero
+        if (paymentTokenBalance == 0 && mythoBalance == 0 && lpBalance == 0) {
+            revert NothingToDistribute();
+        }
+
+        // Calculate user share for each token type based on circulating supply
         uint256 paymentAmount = (paymentTokenBalance * _totemTokenAmount) /
-            totalSupply;
-
-        // Verify payment token balance if needed
-        if (paymentAmount == 0) revert InsufficientPaymentTokenBalance();
+            circulatingSupply;
+        uint256 mythoAmount = (mythoBalance * _totemTokenAmount) /
+            circulatingSupply;
+        uint256 lpAmount = (lpBalance * _totemTokenAmount) / circulatingSupply;
 
         // Take TotemTokens from the caller
-        totemToken.safeTransferFrom(msg.sender, address(this), _totemTokenAmount);
+        totemToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _totemTokenAmount
+        );
 
         // Handle token disposal based on whether it's a custom token
         if (isCustomToken) {
@@ -130,32 +165,27 @@ contract Totem is AccessControlUpgradeable {
         }
 
         // Transfer the proportional payment tokens to the caller if there are any
-        paymentToken.safeTransfer(msg.sender, paymentAmount);
-        
-        // Calculate and distribute MYTHO tokens
-        uint256 mythoBalance = mythoToken.balanceOf(address(this));
-        uint256 mythoAmount;
-        
-        if (mythoBalance > 0) {
-            mythoAmount = (mythoBalance * _totemTokenAmount) / totalSupply;
-            if (mythoAmount > 0) {
-                mythoToken.safeTransfer(msg.sender, mythoAmount);
-            }
-        }
-        
-        // Calculate and distribute LP tokens
-        uint256 lpAmount;
-        if (address(liquidityToken) != address(0)) {
-            uint256 lpBalance = liquidityToken.balanceOf(address(this));
-            if (lpBalance > 0) {
-                lpAmount = (lpBalance * _totemTokenAmount) / totalSupply;
-                if (lpAmount > 0) {
-                    liquidityToken.safeTransfer(msg.sender, lpAmount);
-                }
-            }
+        if (paymentAmount > 0) {
+            paymentToken.safeTransfer(msg.sender, paymentAmount);
         }
 
-        emit TotemTokenBurned(msg.sender, _totemTokenAmount, paymentAmount, mythoAmount, lpAmount);
+        // Transfer MYTHO tokens if there are any
+        if (mythoAmount > 0) {
+            mythoToken.safeTransfer(msg.sender, mythoAmount);
+        }
+
+        // Transfer LP tokens if there are any
+        if (lpAmount > 0 && address(liquidityToken) != address(0)) {
+            liquidityToken.safeTransfer(msg.sender, lpAmount);
+        }
+
+        emit TotemTokenBurned(
+            msg.sender,
+            _totemTokenAmount,
+            paymentAmount,
+            mythoAmount,
+            lpAmount
+        );
     }
 
     /**
@@ -199,11 +229,15 @@ contract Totem is AccessControlUpgradeable {
      * @return paymentTokenAddr The address of the payment token
      * @return liquidityTokenAddr The address of the liquidity token
      */
-    function getTokenAddresses() external view returns (
-        address totemTokenAddr,
-        address paymentTokenAddr,
-        address liquidityTokenAddr
-    ) {
+    function getTokenAddresses()
+        external
+        view
+        returns (
+            address totemTokenAddr,
+            address paymentTokenAddr,
+            address liquidityTokenAddr
+        )
+    {
         return (
             address(totemToken),
             address(paymentToken),
@@ -218,19 +252,29 @@ contract Totem is AccessControlUpgradeable {
      * @return liquidityBalance The balance of liquidity tokens
      * @return mythoBalance The balance of MYTHO tokens
      */
-    function getAllBalances() external view returns (
-        uint256 totemBalance,
-        uint256 paymentBalance,
-        uint256 liquidityBalance,
-        uint256 mythoBalance
-    ) {
+    function getAllBalances()
+        external
+        view
+        returns (
+            uint256 totemBalance,
+            uint256 paymentBalance,
+            uint256 liquidityBalance,
+            uint256 mythoBalance
+        )
+    {
         totemBalance = totemToken.balanceOf(address(this));
-        paymentBalance = address(paymentToken) != address(0) ? paymentToken.balanceOf(address(this)) : 0;
-        liquidityBalance = address(liquidityToken) != address(0) ? liquidityToken.balanceOf(address(this)) : 0;
-        
+        paymentBalance = address(paymentToken) != address(0)
+            ? paymentToken.balanceOf(address(this))
+            : 0;
+        liquidityBalance = address(liquidityToken) != address(0)
+            ? liquidityToken.balanceOf(address(this))
+            : 0;
+
         address mythoAddr = MeritManager(meritManagerAddr).mythoToken();
-        mythoBalance = mythoAddr != address(0) ? IERC20(mythoAddr).balanceOf(address(this)) : 0;
-        
+        mythoBalance = mythoAddr != address(0)
+            ? IERC20(mythoAddr).balanceOf(address(this))
+            : 0;
+
         return (totemBalance, paymentBalance, liquidityBalance, mythoBalance);
     }
 
@@ -238,7 +282,20 @@ contract Totem is AccessControlUpgradeable {
      * @notice Check if this is a custom token Totem
      * @return True if this is a custom token Totem, false otherwise
      */
-    function isCustomTokenTotem() external view returns (bool) {
+    function isCustomTotemToken() external view returns (bool) {
         return isCustomToken;
+    }
+
+    /**
+     * @notice Get the circulating supply of the TotemToken
+     * @return The circulating supply (total supply minus tokens held by Totem and Treasury for custom tokens)
+     */
+    function getCirculatingSupply() public view returns (uint256) {
+        uint256 totalSupply = totemToken.totalSupply();
+        uint256 totemBalance = totemToken.balanceOf(address(this));
+        uint256 treasuryBalance = isCustomToken
+            ? totemToken.balanceOf(treasuryAddr)
+            : 0;
+        return totalSupply - totemBalance - treasuryBalance;
     }
 }
