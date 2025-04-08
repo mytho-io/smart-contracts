@@ -5,17 +5,15 @@ import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/acce
 
 /**
  * @title AddressRegistry
- * @dev Central registry for storing and retrieving addresses of key contracts in the system.
+ * @notice Central registry for storing and retrieving addresses of key contracts in the system.
  * Provides a single source of truth for contract addresses and manages access control.
  */
 contract AddressRegistry is AccessControlUpgradeable {
-    // Map of registered addresses (identifier => registeredAddress)
+    // State variables
     mapping(bytes32 => address) private _addresses;
 
-    // Roles
+    // Constants
     bytes32 private constant MANAGER = keccak256("MANAGER");
-
-    // Main identifiers
     bytes32 private constant MERIT_MANAGER = "MERIT_MANAGER";
     bytes32 private constant MYTHO_TOKEN = "MYTHO_TOKEN";
     bytes32 private constant MYTHO_TREASURY = "MYTHO_TREASURY";
@@ -29,8 +27,12 @@ contract AddressRegistry is AccessControlUpgradeable {
         address newAddress
     );
 
+    // Custom errors
+    error InvalidIdentifier(bytes32 id);
+    error ZeroAddress();
+
     /**
-     * @dev Initializes the contract and sets up initial roles
+     * @notice Initializes the contract and sets up initial roles
      * Sets the deployer as both DEFAULT_ADMIN_ROLE and MANAGER
      */
     function initialize() public initializer {
@@ -40,8 +42,10 @@ contract AddressRegistry is AccessControlUpgradeable {
         _grantRole(MANAGER, msg.sender);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
-     * @dev Sets or updates an address in the registry
+     * @notice Sets or updates an address in the registry
      * @param _id Identifier for the address being set
      * @param _newAddress New address to associate with the identifier
      */
@@ -49,14 +53,18 @@ contract AddressRegistry is AccessControlUpgradeable {
         bytes32 _id,
         address _newAddress
     ) external onlyRole(MANAGER) {
+        if (_newAddress == address(0)) revert ZeroAddress();
+        
         address oldAddress = _addresses[_id];
         _addresses[_id] = _newAddress;
 
         emit AddressSet(_id, oldAddress, _newAddress);
     }
 
+    // VIEW FUNCTIONS
+
     /**
-     * @dev Gets the address of the MeritManager contract
+     * @notice Gets the address of the MeritManager contract
      * @return Address of the MeritManager contract
      */
     function getMeritManager() external view returns (address) {
@@ -64,7 +72,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the address of the MYTHO token contract
+     * @notice Gets the address of the MYTHO token contract
      * @return Address of the MYTHO token contract
      */
     function getMythoToken() external view returns (address) {
@@ -72,7 +80,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the address of the MYTHO treasury
+     * @notice Gets the address of the MYTHO treasury
      * @return Address of the MYTHO treasury
      */
     function getMythoTreasury() external view returns (address) {
@@ -80,7 +88,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the address of the TotemFactory contract
+     * @notice Gets the address of the TotemFactory contract
      * @return Address of the TotemFactory contract
      */
     function getTotemFactory() external view returns (address) {
@@ -88,7 +96,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the address of the TotemTokenDistributor contract
+     * @notice Gets the address of the TotemTokenDistributor contract
      * @return Address of the TotemTokenDistributor contract
      */
     function getTotemTokenDistributor() external view returns (address) {
@@ -96,11 +104,11 @@ contract AddressRegistry is AccessControlUpgradeable {
     }    
 
     /**
-     * @dev Gets an address from the registry by its identifier
-     * @param id Identifier for the address to retrieve
+     * @notice Gets an address from the registry by its identifier
+     * @param _id Identifier for the address to retrieve
      * @return Address associated with the given identifier
      */
-    function getAddress(bytes32 id) public view returns (address) {
-        return _addresses[id];
+    function getAddress(bytes32 _id) public view returns (address) {
+        return _addresses[_id];
     }
 }

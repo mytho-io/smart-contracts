@@ -12,7 +12,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 contract MYTHO is ERC20 {
     using SafeERC20 for ERC20;    
 
-    // Token distribution constants
+    // Constants - Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18; // 1 billion tokens with 18 decimals
     
     // Totem incentives distribution (50% of total supply)
@@ -30,12 +30,12 @@ contract MYTHO is ERC20 {
     // Mytho AMM incentives (7% of total supply)
     uint256 public constant AMM_INCENTIVES = 70_000_000 * 10**18;
 
-    // Vesting duration constants
+    // Constants - Vesting duration
     uint64 public constant ONE_YEAR = 12 * 30 days;
     uint64 public constant TWO_YEARS = 2 * ONE_YEAR;
     uint64 public constant FOUR_YEARS = 4 * ONE_YEAR;
 
-    // Vesting wallet and recipient addresses (immutable)
+    // Immutable variables - Vesting wallet and recipient addresses
     address public immutable meritVestingYear1;
     address public immutable meritVestingYear2;
     address public immutable meritVestingYear3;
@@ -47,6 +47,7 @@ contract MYTHO is ERC20 {
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
     error OnlyOwnerCanBurn();
+    error InvalidAmount(uint256 amount);
 
     /**
      * @notice Constructor to deploy the token and set up vesting schedules
@@ -97,20 +98,20 @@ contract MYTHO is ERC20 {
         _transfer(address(this), treasury, TREASURY_ALLOCATION);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
      * @notice Burns tokens from the caller's address
-     * @dev Can only be called by the token owner
+     *      Can only be called by the token owner
      * @param _account Address from which tokens are burned
      * @param _amount Amount of tokens to burn
      */
-    function burn(address _account, uint256 _amount) external {
+    function burn(
+        address _account,
+        uint256 _amount
+    ) external {
         if (msg.sender != _account) revert OnlyOwnerCanBurn();
+        if (_amount == 0) revert InvalidAmount(0);
         _burn(_account, _amount);
-    }
-
-    /// TEST LOGIC
-
-    function mint(address _account, uint256 _amount) external {
-        _mint(_account, _amount);
     }
 }

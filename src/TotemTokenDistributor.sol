@@ -18,13 +18,9 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title TotemTokenDistributor
- * @dev This contract manages the distribution of Totem tokens during and after sales periods.
- * It handles:
- * - Registration of new totems from the TotemFactory
- * - Buying and selling totems during the sales period
- * - Distribution of collected payment tokens after the sales period ends
- * - Adding liquidity to AMM pools
- * - Burning totem tokens
+ * @notice This contract manages the distribution of Totem tokens during and after sales periods
+ *      Handles registration of new totems, token sales, distribution of collected payment tokens,
+ *      adding liquidity to AMM pools, and burning totem tokens
  */
 
 contract TotemTokenDistributor is AccessControlUpgradeable {
@@ -53,10 +49,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     // Mapping from token address to Chainlink price feed address
     mapping(address => address) private priceFeedAddresses;
 
-    /// @dev General info about totems
+    // General info about totems
     mapping(address totemTokenAddr => TotemData TotemData) private totems;
 
-    /// @dev Number of sale positions are eq to the used paymentTokens by address
     mapping(address userAddress => mapping(address totemTokenAddr => SalePosInToken))
         private salePositions;
 
@@ -70,6 +65,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     uint256 private constant PRECISION = 10000;
     uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
 
+    // Structs
     struct TotemData {
         address totemAddr;
         address creator;
@@ -142,6 +138,13 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     error LiquidityAdditionFailed();
     error UniswapRouterNotSet();
 
+    // INITIALIZER
+
+    /**
+     * @notice Initializes the TotemTokenDistributor contract
+     *      Sets up initial roles and configuration
+     * @param _registryAddr Address of the AddressRegistry contract
+     */
     function initialize(address _registryAddr) public initializer {
         __AccessControl_init();
 
@@ -165,7 +168,12 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         vaultPaymentTokenShare = 6843; // 68.43%
     }
 
-    /// @notice Being called by TotemFactory during totem creation
+    // EXTERNAL FUNCTIONS
+
+    /**
+     * @notice Being called by TotemFactory during totem creation
+     *      Registers a new totem and distributes initial tokens
+     */
     function register() external {
         if (address(factory) == address(0)) revert AlreadySet();
         if (msg.sender != address(factory)) revert OnlyFactory();
@@ -200,8 +208,15 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
     }
 
-    /// @notice Buy totems for allowed payment tokens
-    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+    /**
+     * @notice Buy totems for allowed payment tokens
+     * @param _totemTokenAddr Address of the totem token to buy
+     * @param _totemTokenAmount Amount of totem tokens to buy
+     */
+    function buy(
+        address _totemTokenAddr,
+        uint256 _totemTokenAmount
+    ) external {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -262,8 +277,15 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         }
     }
 
-    /// @notice Sell totems for used payment token in sale period
-    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+    /**
+     * @notice Sell totems for used payment token in sale period
+     * @param _totemTokenAddr Address of the totem token to sell
+     * @param _totemTokenAmount Amount of totem tokens to sell
+     */
+    function sell(
+        address _totemTokenAddr,
+        uint256 _totemTokenAmount
+    ) external {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -311,6 +333,11 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /// INTERNAL LOGIC
 
+    /**
+     * @notice Closes the sale period for a totem token
+     *      Distributes collected payment tokens and adds liquidity to AMM
+     * @param _totemTokenAddr Address of the totem token
+     */
     function _closeSalePeriod(address _totemTokenAddr) internal {
         // close sale period and open burn functionality for totem token
         totems[_totemTokenAddr].isSalePeriod = false;
@@ -375,7 +402,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /**
      * @notice Adds liquidity to a Uniswap V2 pool
-     * @dev Approves tokens for the router and adds liquidity to the pool
+     *      Approves tokens for the router and adds liquidity to the pool
      * @param _totemTokenAddr Address of the totem token
      * @param _paymentTokenAddr Address of the payment token
      * @param _totemTokenAmount Amount of totem tokens to add to the pool
@@ -440,6 +467,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /// ADMIN LOGIC
 
+    /**
+     * @notice Sets the payment token address
+     * @param _paymentTokenAddr Address of the payment token
+     */
     function setPaymentToken(
         address _paymentTokenAddr
     ) external onlyRole(MANAGER) {
@@ -447,6 +478,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         paymentTokenAddr = _paymentTokenAddr;
     }
 
+    /**
+     * @notice Sets the TotemFactory address from registry
+     * @param _registryAddr Address of the AddressRegistry contract
+     */
     function setTotemFactory(address _registryAddr) external onlyRole(MANAGER) {
         if (address(factory) != address(0)) revert AlreadySet();
         if (_registryAddr == address(0)) revert ZeroAddress();
@@ -455,6 +490,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
     }
 
+    /**
+     * @notice Sets the maximum number of totem tokens per address
+     * @param _amount Maximum amount of tokens
+     */
     function setMaxTotemTokensPerAddress(
         uint256 _amount
     ) external onlyRole(MANAGER) {
@@ -564,7 +603,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /**
      * @notice Returns the price of a given token in USD
-     * @dev Uses Chainlink price feeds to get the token price in USD
+     *      Uses Chainlink price feeds to get the token price in USD
      * @param _tokenAddr Address of the token to get the price for
      * @return Amount of tokens equivalent to 1 USD
      */
@@ -637,7 +676,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /**
      * @notice Calculates the number of totem tokens available for purchase
-     * @dev Takes into account the user's current balance and the maximum allowed tokens per address
+     *      Takes into account the user's current balance and the maximum allowed tokens per address
      * @param _userAddr Address of the user
      * @param _totemTokenAddr Address of the totem token
      * @return The number of totem tokens available for purchase

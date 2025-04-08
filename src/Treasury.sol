@@ -5,35 +5,45 @@ import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/acce
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
- * @title RevenuePool
- * @dev This contract manages and withdraws ERC20 and native tokens.
+ * @title Treasury
+ * @notice This contract manages and withdraws ERC20 and native tokens.
  * It provides functionality to:
  * - Withdraw ERC20 tokens to specified addresses
  * - Withdraw native tokens to specified addresses
  * - Check balances of ERC20 and native tokens
  */
 contract Treasury is AccessControlUpgradeable {
+    // Constants
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
+    // Events
     event ERC20Withdrawn(address indexed token, address indexed to, uint256 amount);
     event NativeWithdrawn(address indexed to, uint256 amount);
 
+    // Custom errors
     error ZeroAddress();
     error ZeroAmount();
     error InsufficientBalance(uint256 requested, uint256 available);
+    error NativeTransferFailed();
 
     function initialize() public initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
-     * @dev Withdraws ERC20 tokens, restricted to MANAGER
+     * @notice Withdraws ERC20 tokens, restricted to MANAGER
      * @param _token Address of the ERC20 token to withdraw
      * @param _to Recipient address
      * @param _amount Amount of tokens to withdraw
      */
-    function withdrawERC20(address _token, address _to, uint256 _amount) external onlyRole(MANAGER) {
+    function withdrawERC20(
+        address _token,
+        address _to,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
         if (_token == address(0) || _to == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
         uint256 balance = IERC20(_token).balanceOf(address(this));
@@ -43,28 +53,33 @@ contract Treasury is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Withdraws native tokens, restricted to MANAGER
+     * @notice Withdraws native tokens, restricted to MANAGER
      * @param _to Recipient address (payable)
      * @param _amount Amount of native tokens to withdraw (in wei)
      */
-    function withdrawNative(address payable _to, uint256 _amount) external onlyRole(MANAGER) {
+    function withdrawNative(
+        address payable _to,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
         if (_to == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
         if (address(this).balance < _amount) revert InsufficientBalance(_amount, address(this).balance);
+        
         (bool success, ) = _to.call{value: _amount}("");
-        require(success, "Native transfer failed");
+        if (!success) revert NativeTransferFailed();
+        
         emit NativeWithdrawn(_to, _amount);
     }
 
     /**
-     * @dev Allows contract to receive native tokens
+     * @notice Allows contract to receive native tokens
      */
     receive() external payable {}
 
-    /// READERS
+    // VIEW FUNCTIONS
 
     /**
-     * @dev Returns balance of a specific ERC20 token
+     * @notice Returns balance of a specific ERC20 token
      * @param _token Address of the ERC20 token
      * @return Token balance of the contract
      */
@@ -73,7 +88,7 @@ contract Treasury is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Returns native token balance
+     * @notice Returns native token balance
      * @return Native token balance of the contract (in wei)
      */
     function getNativeBalance() external view returns (uint256) {

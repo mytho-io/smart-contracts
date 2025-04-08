@@ -10,34 +10,36 @@ import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 import {TotemToken} from "./TotemToken.sol";
 
-import "forge-std/Test.sol";
-
 /**
  * @title Totem
  * @notice This contract represents a Totem in the MYTHO ecosystem, managing token burning and merit distribution
- * @dev Handles the lifecycle of a Totem, including token burning after sale period and merit distribution
+ *      Handles the lifecycle of a Totem, including token burning after sale period and merit distribution
  */
 contract Totem is AccessControlUpgradeable {
     using SafeERC20 for IERC20;
     using SafeERC20 for TotemToken;
 
+    // State variables - Tokens
     TotemToken private totemToken;
     IERC20 private paymentToken;
     IERC20 private liquidityToken;
     IERC20 private mythoToken;
 
+    // State variables - Data
     bytes private dataHash;
 
+    // State variables - Addresses
     address private treasuryAddr;
     address private totemDistributorAddr;
     address private meritManagerAddr;
-
     address public owner;
     address[] public collaborators;
 
+    // State variables - Flags
     bool private isCustomToken;
     bool public salePeriodEnded;
 
+    // Constants
     bytes32 private constant TOTEM_DISTRIBUTOR = keccak256("TOTEM_DISTRIBUTOR");
 
     // Events
@@ -61,7 +63,7 @@ contract Totem is AccessControlUpgradeable {
 
     /**
      * @notice Initializes the Totem contract with token addresses, data hash, and revenue pool
-     * @dev Sets up the initial state and grants roles
+     *      Sets up the initial state and grants roles
      * @param _totemToken The address of the TotemToken or custom token
      * @param _dataHash The data hash associated with this Totem
      * @param _registryAddr Address of the AddressRegistry contract
@@ -111,9 +113,11 @@ contract Totem is AccessControlUpgradeable {
         _grantRole(TOTEM_DISTRIBUTOR, totemDistributorAddr);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
      * @notice Allows TotemToken holders to burn or transfer their tokens and receive proportional shares of assets
-     * @dev After the sale period ends, burns TotemTokens for standard tokens or transfers custom tokens to treasuryAddr.
+     *      After the sale period ends, burns TotemTokens for standard tokens or transfers custom tokens to treasuryAddr.
      *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens based on circulating supply.
      * @param _totemTokenAmount The amount of TotemToken to burn or transfer
      */
@@ -199,7 +203,7 @@ contract Totem is AccessControlUpgradeable {
 
     /**
      * @notice Sets the payment token and liquidity token addresses and ends the sale period
-     * @dev Should be called by TotemTokenDistributor after sale period ends
+     *      Should be called by TotemTokenDistributor after sale period ends
      * @param _paymentToken The address of the payment token contract
      * @param _liquidityToken The address of the liquidity token (LP token)
      */
@@ -214,9 +218,11 @@ contract Totem is AccessControlUpgradeable {
         emit SalePeriodEnded();
     }
 
+    // VIEW FUNCTIONS
+
     /**
      * @notice Get the data hash associated with this Totem
-     * @dev Returns the data hash that was set during initialization
+     *      Returns the data hash that was set during initialization
      * @return The data hash stored in the contract
      */
     function getDataHash() external view returns (bytes memory) {

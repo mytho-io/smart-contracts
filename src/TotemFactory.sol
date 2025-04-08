@@ -12,26 +12,30 @@ import {TotemToken} from "./TotemToken.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 
+/**
+ * @title TotemFactory
+ * @notice Factory contract for creating new Totems in the MYTHO ecosystem
+ *      Handles creation of new Totems with either new or existing tokens
+ */
 contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
-    // Totem token distributor instance
+    // State variables - Contracts
     TotemTokenDistributor private totemDistributor;
 
-    // Core contract addresses
+    // State variables - Addresses
     address private beaconAddr;
     address private treasuryAddr;
     address private meritManagerAddr;
     address private registryAddr;
-
-    // ASTR token address
     address private feeTokenAddr;
 
-    // Fee settings
+    // State variables - Fee settings
     uint256 private creationFee;
-
     uint256 private lastId;
 
+    // Mappings
     mapping(uint256 totemId => TotemData data) private totemData;
 
+    // Structs
     struct TotemData {
         address creator;
         address totemTokenAddr;
@@ -40,9 +44,11 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         bool isCustomToken;
     }
 
+    // Constants - Roles
     bytes32 private constant MANAGER = keccak256("MANAGER");
     bytes32 private constant WHITELISTED = keccak256("WHITELISTED");
 
+    // Events
     event TotemCreated(
         address totemAddr,
         address totemTokenAddr,
@@ -57,6 +63,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     event FeeTokenUpdated(address oldToken, address newToken);
     event BatchWhitelistUpdated(address[] tokens, bool isAdded);
 
+    // Custom errors
     error AlreadyWhitelisted(address totemTokenAddr);
     error NotWhitelisted(address totemTokenAddr);
     error InsufficientFee(uint256 provided, uint256 required);
@@ -64,7 +71,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     error ZeroAddress();
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
+    error ZeroAmount();
 
+    /**
+     * @notice Initializes the TotemFactory contract
+     *      Sets up initial roles and configuration
+     * @param _registryAddr Address of the AddressRegistry contract
+     * @param _beaconAddr Address of the beacon for Totem proxies
+     * @param _feeTokenAddr Address of the token used for creation fees
+     */
     function initialize(
         address _registryAddr,
         address _beaconAddr,
@@ -90,28 +105,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         creationFee = 1 ether;
     }
 
-    /**
-     * @dev Collects creation fee from the sender
-     * @param _sender The address paying the fee
-     */
-    function _collectFee(address _sender) internal {
-        // Skip fee collection if fee is set to zero
-        if (creationFee == 0) return;
-
-        // Transfer tokens from sender to fee collector
-        bool success = IERC20(feeTokenAddr).transferFrom(
-            _sender,
-            treasuryAddr,
-            creationFee
-        );
-        if (!success) revert FeeTransferFailed();
-    }
+    // EXTERNAL FUNCTIONS
 
     /**
-     * @dev Creates a new totem with a new token
+     * @notice Creates a new totem with a new token
+     *      Deploys a new TotemToken and Totem proxy
      * @param _dataHash The hash of the totem data
      * @param _tokenName The name of the token
      * @param _tokenSymbol The symbol of the token
+     * @param _collaborators Array of collaborator addresses
      */
     function createTotem(
         bytes memory _dataHash,
@@ -164,9 +166,11 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Creates a new totem with an existing whitelisted token
+     * @notice Creates a new totem with an existing whitelisted token
+     *      Uses an existing token instead of deploying a new one
      * @param _dataHash The hash of the totem data
      * @param _tokenAddr The address of the existing token
+     * @param _collaborators Array of collaborator addresses
      */
     function createTotemWithExistingToken(
         bytes memory _dataHash,
@@ -213,10 +217,10 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         );
     }
 
-    /// ADMIN LOGIC
+    // ADMIN FUNCTIONS
 
     /**
-     * @dev Updates the creation fee
+     * @notice Updates the creation fee
      * @param _newFee The new fee amount
      */
     function setCreationFee(uint256 _newFee) public onlyRole(MANAGER) {
@@ -226,7 +230,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Updates the fee token address
+     * @notice Updates the fee token address
      * @param _newFeeToken The address of the new fee token
      */
     function setFeeToken(address _newFeeToken) public onlyRole(MANAGER) {
@@ -238,7 +242,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Adds multiple tokens to the whitelist
+     * @notice Adds multiple tokens to the whitelist
      * @param _tokens Array of token addresses to whitelist
      */
     function batchAddToWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
@@ -252,7 +256,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Removes multiple tokens from the whitelist
+     * @notice Removes multiple tokens from the whitelist
      * @param _tokens Array of token addresses to remove from whitelist
      */
     function batchRemoveFromWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
@@ -266,7 +270,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Adds a single token to the whitelist
+     * @notice Adds a single token to the whitelist
      * @param _token The token address to whitelist
      */
     function addTokenToWhitelist(address _token) public onlyRole(MANAGER) {
@@ -279,7 +283,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Removes a single token from the whitelist
+     * @notice Removes a single token from the whitelist
      * @param _token The token address to remove from whitelist
      */
     function removeTokenFromWhitelist(address _token) public onlyRole(MANAGER) {
@@ -291,18 +295,43 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         emit BatchWhitelistUpdated(tokens, false);
     }
 
+    /**
+     * @notice Pauses the contract
+     */
     function pause() public onlyRole(MANAGER) {
         _pause();
     }
 
+    /**
+     * @notice Unpauses the contract
+     */
     function unpause() public onlyRole(MANAGER) {
         _unpause();
     }
 
-    /// READERS
+    // INTERNAL FUNCTIONS
 
     /**
-     * @dev Gets the current creation fee
+     * @notice Collects creation fee from the sender
+     * @param _sender The address paying the fee
+     */
+    function _collectFee(address _sender) internal {
+        // Skip fee collection if fee is set to zero
+        if (creationFee == 0) return;
+
+        // Transfer tokens from sender to fee collector
+        bool success = IERC20(feeTokenAddr).transferFrom(
+            _sender,
+            treasuryAddr,
+            creationFee
+        );
+        if (!success) revert FeeTransferFailed();
+    }
+
+    // VIEW FUNCTIONS
+
+    /**
+     * @notice Gets the current creation fee
      * @return The current fee amount in fee tokens
      */
     function getCreationFee() external view returns (uint256) {
@@ -310,7 +339,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the current fee token address
+     * @notice Gets the current fee token address
      * @return The address of the current fee token
      */
     function getFeeToken() external view returns (address) {
@@ -318,7 +347,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the last assigned totem ID
+     * @notice Gets the last assigned totem ID
      * @return The last totem ID
      */
     function getLastId() external view returns (uint256) {
@@ -326,7 +355,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets data for a specific totem
+     * @notice Gets data for a specific totem
      * @param _totemId The ID of the totem
      * @return The totem data structure
      */
