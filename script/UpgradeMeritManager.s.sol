@@ -52,4 +52,4 @@ contract UpgradeMeritManager is Script {
     }
 }
 
-// current implementation: 0x6EA3FCDbDD55749172b5c8a7D2BD53Cda0343629
+// current implementation: 0xAB68FFA52a7c3ab8247fB54632Ae075a6BA1A836

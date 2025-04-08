@@ -11,6 +11,7 @@ import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {AddressRegistry} from "./AddressRegistry.sol";
+import {Totem} from "./Totem.sol";
 
 /**
  * @title MeritManager
@@ -85,6 +86,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error InvalidPeriod();
     error TransferFailed();
     error InvalidAddress();
+    error InsufficientTotemBalance();
 
     /**
      * @dev Initializes the contract with required parameters
@@ -169,6 +171,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
         if (!isMythum()) revert NotInMythumPeriod();
+
+        // Get the totem token address and check if the user has it
+        (address totemTokenAddr,,) = Totem(_totemAddr).getTokenAddresses();
+        if (IERC20(totemTokenAddr).balanceOf(msg.sender) == 0) revert InsufficientTotemBalance();
 
         uint256 currentPeriod_ = currentPeriod();
 
@@ -689,7 +695,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function createTotem(
         bytes memory _dataHash,
         string memory _tokenName,
-        string memory _tokenSymbol
+        string memory _tokenSymbol,
+        address[] memory _collaborators
     ) public whenNotPaused {
         if (
             bytes(_tokenName).length == 0 ||
@@ -717,7 +724,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
                 registryAddr,
                 false,
                 msg.sender,
-                new address[](0)
+                _collaborators
             )
         );
 
@@ -742,7 +749,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      */
     function createTotemWithExistingToken(
         bytes memory _dataHash,
-        address _tokenAddr
+        address _tokenAddr,
+        address[] memory _collaborators
     ) public whenNotPaused {
         if (_dataHash.length == 0) {
             revert InvalidTotemParameters("Empty dataHash");
@@ -763,7 +771,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
                 registryAddr,
                 true,
                 msg.sender,
-                new address[](0)
+                _collaborators
             )
         );
 
@@ -1455,7 +1463,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _tokenAddr,
         uint256 _totemsAmount
     ) public view returns (uint256) {
-        return (_totemsAmount * oneTotemPriceInUsd) / getPrice(_tokenAddr);
+        uint256 amount = (_totemsAmount * oneTotemPriceInUsd) /
+            getPrice(_tokenAddr);
+        return amount == 0 ? 1 : amount;
     }
 
     /**
@@ -1468,8 +1478,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address _tokenAddr,
         uint256 _paymentTokenAmount
     ) public view returns (uint256) {
-        return
-            (_paymentTokenAmount * getPrice(_tokenAddr)) / oneTotemPriceInUsd;
+        uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr)) /
+            oneTotemPriceInUsd;
+        return amount == 0 ? 1 : amount;
     }
 
     /**
@@ -1482,8 +1493,9 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         address priceFeedAddr = priceFeedAddresses[_tokenAddr];
 
         if (priceFeedAddr == address(0)) {
-            // If no price feed is set for this token, return a default value
+            // If no price feed is set for this token, return a default value. For test purposes
             return 0.05 * 1e18;
+
             // revert NoPriceFeedSet(_tokenAddr);
         }
 
@@ -1728,7 +1740,7 @@ contract Totem is AccessControlUpgradeable {
     address private treasuryAddr;
     address private totemDistributorAddr;
     address private meritManagerAddr;
-    
+
     address public owner;
     address[] public collaborators;
 
@@ -1779,10 +1791,11 @@ contract Totem is AccessControlUpgradeable {
         dataHash = _dataHash;
 
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
-        totemDistributorAddr = AddressRegistry(_registryAddr).getTotemTokenDistributor();
+        totemDistributorAddr = AddressRegistry(_registryAddr)
+            .getTotemTokenDistributor();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         mythoToken = IERC20(MeritManager(meritManagerAddr).mythoToken());
-        
+
         isCustomToken = _isCustomToken;
         salePeriodEnded = false; // Initially, sale period is active
 
@@ -1808,16 +1821,30 @@ contract Totem is AccessControlUpgradeable {
         // Get the total supply of TotemToken
         uint256 totalSupply = totemToken.totalSupply();
 
-        // Calculate the user's share of payment tokens based on their submitted amount
+        // Check balances of all token types
         uint256 paymentTokenBalance = paymentToken.balanceOf(address(this));
+        uint256 mythoBalance = mythoToken.balanceOf(address(this));
+        uint256 lpBalance = address(liquidityToken) != address(0)
+            ? liquidityToken.balanceOf(address(this))
+            : 0;
+
+        // Check if all balances are zero
+        if (paymentTokenBalance == 0 && mythoBalance == 0 && lpBalance == 0) {
+            revert InsufficientPaymentTokenBalance();
+        }
+
+        // Calculate user share for each token type
         uint256 paymentAmount = (paymentTokenBalance * _totemTokenAmount) /
             totalSupply;
-
-        // Verify payment token balance if needed
-        if (paymentAmount == 0) revert InsufficientPaymentTokenBalance();
+        uint256 mythoAmount = (mythoBalance * _totemTokenAmount) / totalSupply;
+        uint256 lpAmount = (lpBalance * _totemTokenAmount) / totalSupply;
 
         // Take TotemTokens from the caller
-        totemToken.safeTransferFrom(msg.sender, address(this), _totemTokenAmount);
+        totemToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _totemTokenAmount
+        );
 
         // Handle token disposal based on whether it's a custom token
         if (isCustomToken) {
@@ -1829,32 +1856,27 @@ contract Totem is AccessControlUpgradeable {
         }
 
         // Transfer the proportional payment tokens to the caller if there are any
-        paymentToken.safeTransfer(msg.sender, paymentAmount);
-        
-        // Calculate and distribute MYTHO tokens
-        uint256 mythoBalance = mythoToken.balanceOf(address(this));
-        uint256 mythoAmount;
-        
-        if (mythoBalance > 0) {
-            mythoAmount = (mythoBalance * _totemTokenAmount) / totalSupply;
-            if (mythoAmount > 0) {
-                mythoToken.safeTransfer(msg.sender, mythoAmount);
-            }
-        }
-        
-        // Calculate and distribute LP tokens
-        uint256 lpAmount;
-        if (address(liquidityToken) != address(0)) {
-            uint256 lpBalance = liquidityToken.balanceOf(address(this));
-            if (lpBalance > 0) {
-                lpAmount = (lpBalance * _totemTokenAmount) / totalSupply;
-                if (lpAmount > 0) {
-                    liquidityToken.safeTransfer(msg.sender, lpAmount);
-                }
-            }
+        if (paymentAmount > 0) {
+            paymentToken.safeTransfer(msg.sender, paymentAmount);
         }
 
-        emit TotemTokenBurned(msg.sender, _totemTokenAmount, paymentAmount, mythoAmount, lpAmount);
+        // Transfer MYTHO tokens if there are any
+        if (mythoAmount > 0) {
+            mythoToken.safeTransfer(msg.sender, mythoAmount);
+        }
+
+        // Transfer LP tokens if there are any
+        if (lpAmount > 0 && address(liquidityToken) != address(0)) {
+            liquidityToken.safeTransfer(msg.sender, lpAmount);
+        }
+
+        emit TotemTokenBurned(
+            msg.sender,
+            _totemTokenAmount,
+            paymentAmount,
+            mythoAmount,
+            lpAmount
+        );
     }
 
     /**
@@ -1898,11 +1920,15 @@ contract Totem is AccessControlUpgradeable {
      * @return paymentTokenAddr The address of the payment token
      * @return liquidityTokenAddr The address of the liquidity token
      */
-    function getTokenAddresses() external view returns (
-        address totemTokenAddr,
-        address paymentTokenAddr,
-        address liquidityTokenAddr
-    ) {
+    function getTokenAddresses()
+        external
+        view
+        returns (
+            address totemTokenAddr,
+            address paymentTokenAddr,
+            address liquidityTokenAddr
+        )
+    {
         return (
             address(totemToken),
             address(paymentToken),
@@ -1917,19 +1943,29 @@ contract Totem is AccessControlUpgradeable {
      * @return liquidityBalance The balance of liquidity tokens
      * @return mythoBalance The balance of MYTHO tokens
      */
-    function getAllBalances() external view returns (
-        uint256 totemBalance,
-        uint256 paymentBalance,
-        uint256 liquidityBalance,
-        uint256 mythoBalance
-    ) {
+    function getAllBalances()
+        external
+        view
+        returns (
+            uint256 totemBalance,
+            uint256 paymentBalance,
+            uint256 liquidityBalance,
+            uint256 mythoBalance
+        )
+    {
         totemBalance = totemToken.balanceOf(address(this));
-        paymentBalance = address(paymentToken) != address(0) ? paymentToken.balanceOf(address(this)) : 0;
-        liquidityBalance = address(liquidityToken) != address(0) ? liquidityToken.balanceOf(address(this)) : 0;
-        
+        paymentBalance = address(paymentToken) != address(0)
+            ? paymentToken.balanceOf(address(this))
+            : 0;
+        liquidityBalance = address(liquidityToken) != address(0)
+            ? liquidityToken.balanceOf(address(this))
+            : 0;
+
         address mythoAddr = MeritManager(meritManagerAddr).mythoToken();
-        mythoBalance = mythoAddr != address(0) ? IERC20(mythoAddr).balanceOf(address(this)) : 0;
-        
+        mythoBalance = mythoAddr != address(0)
+            ? IERC20(mythoAddr).balanceOf(address(this))
+            : 0;
+
         return (totemBalance, paymentBalance, liquidityBalance, mythoBalance);
     }
 

@@ -90,17 +90,23 @@ contract Do is Script {
     function run() public {
         fork(minato);
 
-        ERC20(astrToken).approve(address(factory), type(uint256).max);
-        ERC20(astrToken).approve(address(distr), type(uint256).max);
+        MockToken customToken = MockToken(0xA43E037B79bED682Ce48eEF6e969EE5a7F39cf51);
+        // ERC20 kyoLP = ERC20(0x572634d00EddaD9ee693b513ef53260456B3B24e);
+        address totem = 0x5f97611B1d6A08571727F16aa27FdE021f36dEfF;
 
-        // factory.setFeeToken(astrToken);
-        // distr.setPaymentToken(address(astrToken));
-
-        // factory.setCreationFee(0.001 ether);
-
-        // // test value
-        // distr.setMaxTotemTokensPerAddress(1_000_000_000 ether);
-        // distr.setTotemPriceInUsd(1000);
+        console.log("-- Deployer --");
+        console.log("totemTokens:", customToken.balanceOf(deployer));
+        console.log("astrTokens:", ERC20(astrToken).balanceOf(deployer));
+        console.log("mythoTokens:", mytho.balanceOf(deployer));
+        console.log("-- Totem --");
+        console.log("totemTokens:", customToken.balanceOf(totem));
+        console.log("astrTokens:", ERC20(astrToken).balanceOf(totem));
+        console.log("mythoTokens:", mytho.balanceOf(totem));
+        console.log("-- Treasury --");
+        console.log("totemTokens:", customToken.balanceOf(address(treasury)));
+        console.log("astrTokens:", ERC20(astrToken).balanceOf(address(treasury)));
+        console.log("mythoTokens:", mytho.balanceOf(address(treasury)));
+        console.log("native balance:", address(treasury).balance);
     }
 
     function fork(uint256 _forkId) internal {
