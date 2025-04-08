@@ -34,8 +34,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     address[] public registeredTotemsList; // Array to track all registered totems
 
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
-    mapping(uint256 period => mapping(address totemAddress => uint256 points)) public totemMerit; // Total merit points across all totems per period
-    mapping(uint256 period => mapping(address totemAddr => bool claimed)) public isClaimed; // Whether rewards have been claimed for a period by a specific totem
+    mapping(uint256 period => mapping(address totemAddress => uint256 points))
+        public totemMerit; // Total merit points across all totems per period
+    mapping(uint256 period => mapping(address totemAddr => bool claimed))
+        public isClaimed; // Whether rewards have been claimed for a period by a specific totem
     mapping(uint256 period => uint256 releasedMytho) public releasedMytho; // Total MYTHO released per period
     mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Whether a user has boosted in a period
     mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Which Totem a user boosted in a period
@@ -50,7 +52,12 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
     event MeritCredited(address indexed totem, uint256 amount, uint256 period);
-    event TotemBoosted(address indexed totem, address indexed booster, uint256 amount, uint256 period);
+    event TotemBoosted(
+        address indexed totem,
+        address indexed booster,
+        uint256 amount,
+        uint256 period
+    );
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
@@ -78,7 +85,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _registryAddr Address of the AddressRegistry contract
      * @param _vestingWallets Array of vesting wallet addresses
      */
-    function initialize(address _registryAddr, address[4] memory _vestingWallets) public initializer {
+    function initialize(
+        address _registryAddr,
+        address[4] memory _vestingWallets
+    ) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
 
@@ -123,7 +133,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _totemAddr Address of the totem to credit
      * @param _amount Amount of merit points to credit
      */
-    function creditMerit(address _totemAddr, uint256 _amount) external onlyRole(MANAGER) {
+    function creditMerit(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
 
@@ -177,7 +190,12 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         totemMerit[currentPeriod_][_totemAddr] += oneTotemBoost;
         totalMeritPoints[currentPeriod_] += oneTotemBoost;
 
-        emit TotemBoosted(_totemAddr, msg.sender, oneTotemBoost, currentPeriod_);
+        emit TotemBoosted(
+            _totemAddr,
+            msg.sender,
+            oneTotemBoost,
+            currentPeriod_
+        );
     }
 
     /**
@@ -204,7 +222,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         isClaimed[_periodNum][totemAddr] = true;
 
-        uint256 totemShare = (releasedMytho[_periodNum] * totemPoints) / totalPoints;
+        uint256 totemShare = (releasedMytho[_periodNum] * totemPoints) /
+            totalPoints;
 
         IERC20(mythoToken).safeTransfer(totemAddr, totemShare);
 
@@ -228,9 +247,16 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         // Only process completed periods, not the current period
         if (_currentPeriod > lastProcessedPeriod) {
+            uint256 slices = (30 days * 12) / periodDuration;
             // Process all completed periods up to but not including the current period
-            for (uint256 period = lastProcessedPeriod; period < _currentPeriod; period++) {
-                releasedMytho[period] = vestingWalletsAllocation[yearIdx] / 12;
+            for (
+                uint256 period = lastProcessedPeriod;
+                period < _currentPeriod;
+                period++
+            ) {
+                releasedMytho[period] =
+                    vestingWalletsAllocation[yearIdx] /
+                    slices;
                 emit MythoReleased(releasedMytho[period], period);
             }
 
@@ -253,7 +279,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _totem Address of the totem
      * @param _blacklisted Whether to blacklist or unblacklist the totem
      */
-    function setTotemBlacklisted(address _totem, bool _blacklisted) external onlyRole(MANAGER) {
+    function setTotemBlacklisted(
+        address _totem,
+        bool _blacklisted
+    ) external onlyRole(MANAGER) {
         if (!registeredTotems[_totem]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totem) && _blacklisted)
             revert AlreadyBlacklisted(_totem);
@@ -273,7 +302,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @dev Sets the one Totem boost amount
      * @param _oneTotemBoost New boost amount
      */
-    function setOneTotemBoost(uint256 _oneTotemBoost) external onlyRole(MANAGER) {
+    function setOneTotemBoost(
+        uint256 _oneTotemBoost
+    ) external onlyRole(MANAGER) {
         oneTotemBoost = _oneTotemBoost;
         emit ParameterUpdated("oneTotemBoost", _oneTotemBoost);
     }
@@ -282,7 +313,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @dev Sets the Mythum multiplier (in percentage, e.g., 150 = 1.5x)
      * @param _mythumMultiplier New multiplier value
      */
-    function setMythmsMultiplier(uint256 _mythumMultiplier) external onlyRole(MANAGER) {
+    function setMythmsMultiplier(
+        uint256 _mythumMultiplier
+    ) external onlyRole(MANAGER) {
         mythumMultiplier = _mythumMultiplier;
         emit ParameterUpdated("mythumMultiplier", _mythumMultiplier);
     }
@@ -300,7 +333,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @dev Sets the period duration
      * @param _newPeriodDuration New period duration in seconds
      */
-    function setPeriodDuration(uint256 _newPeriodDuration) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setPeriodDuration(
+        uint256 _newPeriodDuration
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newPeriodDuration == 0) revert InvalidPeriodDuration();
         _updateState();
         periodDuration = _newPeriodDuration;
@@ -312,7 +347,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @dev Grants the registrator role to an address
      * @param _registrator Address to grant the role to
      */
-    function grantRegistratorRole(address _registrator) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function grantRegistratorRole(
+        address _registrator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         grantRole(REGISTRATOR, _registrator);
     }
 
@@ -320,7 +357,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @dev Revokes the registrator role from an address
      * @param _registrator Address to revoke the role from
      */
-    function revokeRegistratorRole(address _registrator) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revokeRegistratorRole(
+        address _registrator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         revokeRole(REGISTRATOR, _registrator);
     }
 
@@ -329,7 +368,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _index Index of the wallet to update (0-3)
      * @param _newWallet New wallet address
      */
-    function setVestingWallet(uint256 _index, address _newWallet) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setVestingWallet(
+        uint256 _index,
+        address _newWallet
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_index >= 4) revert InvalidPeriod();
         if (_newWallet == address(0)) revert InvalidAddress();
 
@@ -341,7 +383,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _index Index of the allocation to update (0-3)
      * @param _newAllocation New allocation amount
      */
-    function setVestingWalletAllocation(uint256 _index, uint256 _newAllocation) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setVestingWalletAllocation(
+        uint256 _index,
+        uint256 _newAllocation
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_index >= 4) revert InvalidPeriod();
 
         vestingWalletsAllocation[_index] = _newAllocation;
@@ -352,7 +397,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _periodNum Period number to update
      * @param _amount Amount of MYTHO released
      */
-    function forceUpdateReleasedMytho(uint256 _periodNum, uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function forceUpdateReleasedMytho(
+        uint256 _periodNum,
+        uint256 _amount
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         releasedMytho[_periodNum] = _amount;
         emit MythoReleased(_amount, _periodNum);
     }
@@ -373,7 +421,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Whether current time is in Mythum period
      */
     function isMythum() public view returns (bool) {
-        uint256 currentPeriodStart = deploymentTimestamp + (currentPeriod() * periodDuration);
+        uint256 currentPeriodStart = deploymentTimestamp +
+            (currentPeriod() * periodDuration);
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
         return block.timestamp >= mythumStart;
     }
@@ -383,7 +432,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Year index (0-3)
      */
     function getYearIndex() public view returns (uint256) {
-        return (currentPeriod() / 12) > 3 ? 3 : (currentPeriod() / 12);
+        uint256 slices = (30 days * 12) / periodDuration;
+        return (currentPeriod() / slices) > 3 ? 3 : (currentPeriod() / slices);
     }
 
     /**
@@ -408,7 +458,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _periodNum Period number to check
      * @return Pending MYTHO reward amount
      */
-    function getPendingReward(address _totemAddr, uint256 _periodNum) external view returns (uint256) {
+    function getPendingReward(
+        address _totemAddr,
+        uint256 _periodNum
+    ) external view returns (uint256) {
         if (
             !registeredTotems[_totemAddr] ||
             hasRole(BLACKLISTED, _totemAddr) ||
@@ -432,7 +485,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return startTime Period start timestamp
      * @return endTime Period end timestamp
      */
-    function getPeriodTimeBounds(uint256 _periodNum) external view returns (uint256 startTime, uint256 endTime) {
+    function getPeriodTimeBounds(
+        uint256 _periodNum
+    ) external view returns (uint256 startTime, uint256 endTime) {
         startTime = deploymentTimestamp + (_periodNum * periodDuration);
         endTime = startTime + periodDuration;
         return (startTime, endTime);
@@ -443,7 +498,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Time in seconds until the next period
      */
     function getTimeUntilNextPeriod() external view returns (uint256) {
-        uint256 currentPeriodEnd = deploymentTimestamp + ((currentPeriod() + 1) * periodDuration);
+        uint256 currentPeriodEnd = deploymentTimestamp +
+            ((currentPeriod() + 1) * periodDuration);
         if (block.timestamp >= currentPeriodEnd) {
             return 0;
         }
@@ -455,7 +511,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Timestamp of the current Mythum period start
      */
     function getCurrentMythumStart() external view returns (uint256) {
-        uint256 currentPeriodStart = deploymentTimestamp + (currentPeriod() * periodDuration);
+        uint256 currentPeriodStart = deploymentTimestamp +
+            (currentPeriod() * periodDuration);
         return currentPeriodStart + ((periodDuration * 3) / 4);
     }
 
@@ -464,7 +521,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _totemAddr Address to check
      * @return Whether the address is a registered totem
      */
-    function isRegisteredTotem(address _totemAddr) external view returns (bool) {
+    function isRegisteredTotem(
+        address _totemAddr
+    ) external view returns (bool) {
         return registeredTotems[_totemAddr];
     }
 
@@ -483,7 +542,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _periodNum Period number to check
      * @return Merit points for the totem in the specified period
      */
-    function getTotemMeritPoints(address _totemAddr, uint256 _periodNum) external view returns (uint256) {
+    function getTotemMeritPoints(
+        address _totemAddr,
+        uint256 _periodNum
+    ) external view returns (uint256) {
         return totemMerit[_periodNum][_totemAddr];
     }
 
@@ -493,7 +555,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _periodNum Period number to check
      * @return Whether the user has boosted in the specified period
      */
-    function hasUserBoostedInPeriod(address _user, uint256 _periodNum) external view returns (bool) {
+    function hasUserBoostedInPeriod(
+        address _user,
+        uint256 _periodNum
+    ) external view returns (bool) {
         return userBoostedInPeriod[_periodNum][_user];
     }
 
@@ -503,7 +568,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _periodNum Period number to check
      * @return Address of the totem the user boosted
      */
-    function getUserBoostedTotem(address _user, uint256 _periodNum) external view returns (address) {
+    function getUserBoostedTotem(
+        address _user,
+        uint256 _periodNum
+    ) external view returns (address) {
         return userBoostedTotem[_periodNum][_user];
     }
 }
