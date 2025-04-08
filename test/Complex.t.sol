@@ -688,8 +688,16 @@ contract ComplexTest is Test {
         uint256 totalBurned = userAAmount + userCAmount + userDAmount;
 
         // Verify token supply decreased
-        uint256 expectedSupply = 1_000_000_000 ether - totalBurned;
-        assertEq(IERC20(totemTokenAddr).totalSupply(), expectedSupply);
+        uint256 expectedSupply = 1_000_000_000 ether -
+            totalBurned -
+            IERC20(totemTokenAddr).balanceOf(address(totem)) -
+            IERC20(totemTokenAddr).balanceOf(address(treasury));
+        assertEq(
+            IERC20(totemTokenAddr).totalSupply() -
+                IERC20(totemTokenAddr).balanceOf(address(totem)) -
+                IERC20(totemTokenAddr).balanceOf(address(treasury)),
+            expectedSupply
+        );
 
         // Verify proportional distribution of assets
         uint256 userAMythoExpected = (initialMythoBalance * userAAmount) /
@@ -703,6 +711,81 @@ contract ComplexTest is Test {
         assertApproxEqRel(mytho.balanceOf(userA), userAMythoExpected, 1e15);
         assertApproxEqRel(mytho.balanceOf(userC), userCMythoExpected, 1e15);
         assertApproxEqRel(mytho.balanceOf(userD), userDMythoExpected, 1e15);
+    }
+
+    // Test burning totem tokens with custom token
+    function test_BurnTotemTokens_CustomToken() public {
+        // Create a custom token and whitelist it
+        MockToken customToken = new MockToken();
+        customToken.mint(deployer, 1_000_000 ether);
+        
+        prank(deployer);
+        factory.addTokenToWhitelist(address(customToken));
+        
+        // Transfer tokens to userA for creation fee and custom token
+        prank(deployer);
+        customToken.transfer(userA, 500_000 ether);
+        
+        // Create totem with custom token
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        factory.createTotemWithExistingToken(
+            "customDataHash",
+            address(customToken),
+            new address[](0)
+        );
+        
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+        
+        // Verify it's a custom token totem
+        assertTrue(totem.isCustomTotemToken());
+        assertEq(data.totemTokenAddr, address(customToken));
+        
+        // Credit merit and move to next period to get MYTHO
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 1000);
+        
+        warp(31 days);
+        mm.updateState();
+        
+        prank(address(totem));
+        totem.collectMYTH(0);
+        
+        // Get initial balances
+        uint256 initialMythoBalance = mytho.balanceOf(data.totemAddr);
+        uint256 initialPaymentBalance = paymentToken.balanceOf(data.totemAddr);
+        uint256 initialTreasuryCustomTokenBalance = customToken.balanceOf(address(treasury));
+        
+        // User burns custom tokens
+        uint256 burnAmount = 10_000 ether;
+
+        uint256 initialUserPaymentBalance = paymentToken.balanceOf(userA);
+        
+        prank(userA);
+        customToken.approve(data.totemAddr, burnAmount);
+        totem.burnTotemTokens(burnAmount);
+        
+        // Verify custom tokens were transferred to treasury (not burned)
+        assertEq(
+            customToken.balanceOf(address(treasury)),
+            initialTreasuryCustomTokenBalance + burnAmount
+        );
+        
+        // Calculate expected proportions
+        uint256 circulatingSupply = totem.getCirculatingSupply();
+        uint256 expectedMythoAmount = (initialMythoBalance * burnAmount) / circulatingSupply;
+        uint256 expectedPaymentAmount = (initialPaymentBalance * burnAmount) / circulatingSupply;
+
+        // Verify user received proportional assets
+        assertApproxEqRel(mytho.balanceOf(userA), expectedMythoAmount, 1e16);
+        assertEq(
+            paymentToken.balanceOf(userA),
+            initialUserPaymentBalance + expectedPaymentAmount
+        );
+        
+        // Verify custom token total supply hasn't changed (tokens weren't burned)
+        assertEq(customToken.totalSupply(), 1_000_000 ether);
     }
 
     // Test error cases for TotemTokenDistributor
@@ -807,7 +890,11 @@ contract ComplexTest is Test {
                 address(customToken)
             )
         );
-        factory.createTotemWithExistingToken("dataHash", address(customToken), new address[](0));
+        factory.createTotemWithExistingToken(
+            "dataHash",
+            address(customToken),
+            new address[](0)
+        );
 
         // Test getting non-existent totem data
         vm.expectRevert(abi.encodeWithSelector(TF.TotemNotFound.selector, 999));
@@ -858,27 +945,27 @@ contract ComplexTest is Test {
     function test_BoostTotem_InsufficientTotemBalance() public {
         address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
-        
+
         // End sale period to allow transfers
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Warp to Mythus period (last 25% of period)
         warp(23 days);
-        
+
         // User B has no totem tokens, should fail with InsufficientTotemBalance
         vm.deal(userB, 1 ether); // Provide ETH for boost fee
         prank(userB);
         vm.expectRevert(MM.InsufficientTotemBalance.selector);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
+
         // Transfer some tokens to userB
         prank(userA);
         IERC20(totemTokenAddr).transfer(userB, 100 ether);
-        
+
         // Now userB has tokens and should be able to boost
         prank(userB);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
+
         // Verify the boost was successful
         uint256 period = mm.currentPeriod();
         assertTrue(mm.hasUserBoostedInPeriod(userB, period));
@@ -997,7 +1084,7 @@ contract ComplexTest is Test {
         assertGt(mythoBalance, 0);
 
         // Test isCustomTokenTotem
-        assertFalse(totem.isCustomTokenTotem());
+        assertFalse(totem.isCustomTotemToken());
     }
 
     // Test MeritManager admin functions
