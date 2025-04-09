@@ -23,7 +23,10 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
  *      adding liquidity to AMM pools, and burning totem tokens
  */
 
-contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable {
+contract TotemTokenDistributor is
+    AccessControlUpgradeable,
+    PausableUpgradeable
+{
     using SafeERC20 for IERC20;
 
     // State variables - Contracts
@@ -45,6 +48,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
     address private treasuryAddr; // contract address for revenue in payment tokens
     address private paymentTokenAddr; // address of payment token
     address private uniswapV2RouterAddr; // Uniswap V2 router address
+    address private registryAddr; // address of the AddressRegistry contract
 
     // State variables - Mappings
     mapping(address => address) private priceFeedAddresses; // Mapping from token address to Chainlink price feed address
@@ -131,6 +135,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
     error StalePrice(address tokenAddr);
     error LiquidityAdditionFailed();
     error UniswapRouterNotSet();
+    error EcosystemPaused();
 
     /**
      * @notice Initializes the TotemTokenDistributor contract
@@ -146,6 +151,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
 
         if (_registryAddr == address(0)) revert ZeroAddress();
 
+        registryAddr = _registryAddr;
         AddressRegistry registry = AddressRegistry(_registryAddr);
         mytho = IERC20(registry.getMythoToken());
         treasuryAddr = registry.getMythoTreasury();
@@ -206,7 +212,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
      * @param _totemTokenAddr Address of the totem token to buy
      * @param _totemTokenAmount Amount of totem tokens to buy
      */
-    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
+    function buy(
+        address _totemTokenAddr,
+        uint256 _totemTokenAmount
+    ) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -272,7 +281,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
      * @param _totemTokenAddr Address of the totem token to sell
      * @param _totemTokenAmount Amount of totem tokens to sell
      */
-    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
+    function sell(
+        address _totemTokenAddr,
+        uint256 _totemTokenAmount
+    ) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -334,6 +346,16 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
      */
     function unpause() external onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     /**
