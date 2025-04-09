@@ -7,12 +7,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /**
  * @title MYTHO Government Token
- * @notice Non-upgradeable ERC20 token with fixed supply and vesting distribution
  */
 contract MYTHO is ERC20 {
     using SafeERC20 for ERC20;    
 
-    // Constants - Token distribution
+    // Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18; // 1 billion tokens with 18 decimals
     
     // Totem incentives distribution (50% of total supply)
@@ -30,12 +29,12 @@ contract MYTHO is ERC20 {
     // Mytho AMM incentives (7% of total supply)
     uint256 public constant AMM_INCENTIVES = 70_000_000 * 10**18;
 
-    // Constants - Vesting duration
+    // Vesting duration
     uint64 public constant ONE_YEAR = 12 * 30 days;
     uint64 public constant TWO_YEARS = 2 * ONE_YEAR;
     uint64 public constant FOUR_YEARS = 4 * ONE_YEAR;
 
-    // Immutable variables - Vesting wallet and recipient addresses
+    // Vesting wallet and recipient addresses
     address public immutable meritVestingYear1;
     address public immutable meritVestingYear2;
     address public immutable meritVestingYear3;
@@ -50,7 +49,6 @@ contract MYTHO is ERC20 {
     error InvalidAmount(uint256 amount);
 
     /**
-     * @notice Constructor to deploy the token and set up vesting schedules
      * @param _meritManager Address to receive totem incentives
      * @param _teamReceiver Address to receive team allocation
      * @param _treasuryReceiver Address to receive treasury allocation
@@ -70,7 +68,7 @@ contract MYTHO is ERC20 {
         // Set the start timestamp for vesting
         uint64 startTimestamp = uint64(block.timestamp);
         
-        // Create vesting wallets for totem incentives (4 years with annual releases)
+        // Create vesting wallets for totem incentives (4 years)
         meritVestingYear1 = address(new VestingWallet(_meritManager, startTimestamp, ONE_YEAR));
         meritVestingYear2 = address(new VestingWallet(_meritManager, startTimestamp + ONE_YEAR, ONE_YEAR));
         meritVestingYear3 = address(new VestingWallet(_meritManager, startTimestamp + 2 * ONE_YEAR, ONE_YEAR));
