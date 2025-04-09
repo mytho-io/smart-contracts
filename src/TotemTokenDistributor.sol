@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -24,46 +23,40 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
  */
 
 contract TotemTokenDistributor is AccessControlUpgradeable {
-    using EnumerableSet for EnumerableSet.AddressSet;
     using SafeERC20 for IERC20;
 
+    // State variables - Contracts
     TotemFactory private factory;
     MeritManager private meritManager;
     IERC20 private mytho;
 
-    uint256 public maxTokensPerAddress;
+    // State variables - Configuration
     uint256 private oneTotemPriceInUsd;
+    uint256 public maxTokensPerAddress;
 
-    // Maximum age of price feed data before it's considered stale (1 hour)
-    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours;
-
-    // contract address for revenue in payment tokens
-    address private treasuryAddr;
-
-    // address of payment token
-    address private paymentTokenAddr;
-
-    // Uniswap V2 router address
-    address private uniswapV2RouterAddr;
-
-    // Mapping from token address to Chainlink price feed address
-    mapping(address => address) private priceFeedAddresses;
-
-    // General info about totems
-    mapping(address totemTokenAddr => TotemData TotemData) private totems;
-
-    mapping(address userAddress => mapping(address totemTokenAddr => SalePosInToken))
-        private salePositions;
-
-    bytes32 private constant MANAGER = keccak256("MANAGER");
-
-    // Default percentage shares for distribution - can be made configurable
+    // State variables - Distribution shares
     uint256 public revenuePaymentTokenShare;
     uint256 public totemCreatorPaymentTokenShare;
     uint256 public poolPaymentTokenShare;
     uint256 public vaultPaymentTokenShare;
+
+    // State variables - Addresses
+    address private treasuryAddr; // contract address for revenue in payment tokens
+    address private paymentTokenAddr; // address of payment token
+    address private uniswapV2RouterAddr; // Uniswap V2 router address
+
+    // State variables - Mappings
+    mapping(address => address) private priceFeedAddresses; // Mapping from token address to Chainlink price feed address
+    mapping(address totemTokenAddr => TotemData TotemData) private totems; // General info about totems
+    mapping(address userAddress => mapping(address totemTokenAddr => SalePosInToken))
+        private salePositions;
+
+    // Constants
     uint256 private constant PRECISION = 10000;
     uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
+    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours; // Maximum age of price feed data before it's considered stale (1 hour)
+
+    bytes32 private constant MANAGER = keccak256("MANAGER");
 
     // Structs
     struct TotemData {
@@ -138,8 +131,6 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     error LiquidityAdditionFailed();
     error UniswapRouterNotSet();
 
-    // INITIALIZER
-
     /**
      * @notice Initializes the TotemTokenDistributor contract
      *      Sets up initial roles and configuration
@@ -213,10 +204,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      * @param _totemTokenAddr Address of the totem token to buy
      * @param _totemTokenAmount Amount of totem tokens to buy
      */
-    function buy(
-        address _totemTokenAddr,
-        uint256 _totemTokenAmount
-    ) external {
+    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -282,10 +270,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      * @param _totemTokenAddr Address of the totem token to sell
      * @param _totemTokenAmount Amount of totem tokens to sell
      */
-    function sell(
-        address _totemTokenAddr,
-        uint256 _totemTokenAmount
-    ) external {
+    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -331,7 +316,111 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
     }
 
-    /// INTERNAL LOGIC
+    // ADMIN FUNCTIONS
+
+    /**
+     * @notice Sets the payment token address
+     * @param _paymentTokenAddr Address of the payment token
+     */
+    function setPaymentToken(
+        address _paymentTokenAddr
+    ) external onlyRole(MANAGER) {
+        if (_paymentTokenAddr == address(0)) revert ZeroAddress();
+        paymentTokenAddr = _paymentTokenAddr;
+    }
+
+    /**
+     * @notice Sets the TotemFactory address from registry
+     * @param _registryAddr Address of the AddressRegistry contract
+     */
+    function setTotemFactory(address _registryAddr) external onlyRole(MANAGER) {
+        if (address(factory) != address(0)) revert AlreadySet();
+        if (_registryAddr == address(0)) revert ZeroAddress();
+        factory = TotemFactory(
+            AddressRegistry(_registryAddr).getTotemFactory()
+        );
+    }
+
+    /**
+     * @notice Sets the maximum number of totem tokens per address
+     * @param _amount Maximum amount of tokens
+     */
+    function setMaxTotemTokensPerAddress(
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (_amount == 0) revert WrongAmount(0);
+        maxTokensPerAddress = _amount;
+    }
+
+    /**
+     * @notice Sets the Uniswap V2 router address
+     * @param _routerAddr Address of the Uniswap V2 router
+     */
+    function setUniswapV2Router(
+        address _routerAddr
+    ) external onlyRole(MANAGER) {
+        if (_routerAddr == address(0)) revert ZeroAddress();
+        uniswapV2RouterAddr = _routerAddr;
+    }
+
+    /**
+     * @notice Sets the price feed address for a token
+     * @param _tokenAddr Address of the token
+     * @param _priceFeedAddr Address of the Chainlink price feed for the token/USD pair
+     */
+    function setPriceFeed(
+        address _tokenAddr,
+        address _priceFeedAddr
+    ) external onlyRole(MANAGER) {
+        if (_tokenAddr == address(0) || _priceFeedAddr == address(0))
+            revert ZeroAddress();
+        priceFeedAddresses[_tokenAddr] = _priceFeedAddr;
+        emit PriceFeedSet(_tokenAddr, _priceFeedAddr);
+    }
+
+    /**
+     * @notice Sets the distribution shares for payment tokens
+     * @param _revenueShare Percentage going to treasury (multiplied by PRECISION)
+     * @param _creatorShare Percentage going to totem creator (multiplied by PRECISION)
+     * @param _poolShare Percentage going to liquidity pool (multiplied by PRECISION)
+     * @param _vaultShare Percentage going to totem vault (multiplied by PRECISION)
+     */
+    function setDistributionShares(
+        uint256 _revenueShare,
+        uint256 _creatorShare,
+        uint256 _poolShare,
+        uint256 _vaultShare
+    ) external onlyRole(MANAGER) {
+        if (
+            _revenueShare + _creatorShare + _poolShare + _vaultShare !=
+            PRECISION
+        ) revert InvalidShares();
+
+        revenuePaymentTokenShare = _revenueShare;
+        totemCreatorPaymentTokenShare = _creatorShare;
+        poolPaymentTokenShare = _poolShare;
+        vaultPaymentTokenShare = _vaultShare;
+
+        emit TokenDistributionSharesUpdated(
+            _revenueShare,
+            _creatorShare,
+            _poolShare,
+            _vaultShare
+        );
+    }
+
+    /**
+     * @notice Sets the token price in USD
+     * @param _priceInUsd New price in USD (18 decimals)
+     */
+    function setTotemPriceInUsd(
+        uint256 _priceInUsd
+    ) external onlyRole(MANAGER) {
+        if (_priceInUsd == 0) revert WrongAmount(0);
+        oneTotemPriceInUsd = _priceInUsd;
+    }
+
+    /// INTERNAL FUNCTIONS
 
     /**
      * @notice Closes the sale period for a totem token
@@ -465,109 +554,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         return (liquidity, liquidityToken);
     }
 
-    /// ADMIN LOGIC
-
-    /**
-     * @notice Sets the payment token address
-     * @param _paymentTokenAddr Address of the payment token
-     */
-    function setPaymentToken(
-        address _paymentTokenAddr
-    ) external onlyRole(MANAGER) {
-        if (_paymentTokenAddr == address(0)) revert ZeroAddress();
-        paymentTokenAddr = _paymentTokenAddr;
-    }
-
-    /**
-     * @notice Sets the TotemFactory address from registry
-     * @param _registryAddr Address of the AddressRegistry contract
-     */
-    function setTotemFactory(address _registryAddr) external onlyRole(MANAGER) {
-        if (address(factory) != address(0)) revert AlreadySet();
-        if (_registryAddr == address(0)) revert ZeroAddress();
-        factory = TotemFactory(
-            AddressRegistry(_registryAddr).getTotemFactory()
-        );
-    }
-
-    /**
-     * @notice Sets the maximum number of totem tokens per address
-     * @param _amount Maximum amount of tokens
-     */
-    function setMaxTotemTokensPerAddress(
-        uint256 _amount
-    ) external onlyRole(MANAGER) {
-        if (_amount == 0) revert WrongAmount(0);
-        maxTokensPerAddress = _amount;
-    }
-
-    /**
-     * @notice Sets the Uniswap V2 router address
-     * @param _routerAddr Address of the Uniswap V2 router
-     */
-    function setUniswapV2Router(
-        address _routerAddr
-    ) external onlyRole(MANAGER) {
-        if (_routerAddr == address(0)) revert ZeroAddress();
-        uniswapV2RouterAddr = _routerAddr;
-    }
-
-    /**
-     * @notice Sets the price feed address for a token
-     * @param _tokenAddr Address of the token
-     * @param _priceFeedAddr Address of the Chainlink price feed for the token/USD pair
-     */
-    function setPriceFeed(
-        address _tokenAddr,
-        address _priceFeedAddr
-    ) external onlyRole(MANAGER) {
-        if (_tokenAddr == address(0) || _priceFeedAddr == address(0))
-            revert ZeroAddress();
-        priceFeedAddresses[_tokenAddr] = _priceFeedAddr;
-        emit PriceFeedSet(_tokenAddr, _priceFeedAddr);
-    }
-
-    /**
-     * @notice Sets the distribution shares for payment tokens
-     * @param _revenueShare Percentage going to treasury (multiplied by PRECISION)
-     * @param _creatorShare Percentage going to totem creator (multiplied by PRECISION)
-     * @param _poolShare Percentage going to liquidity pool (multiplied by PRECISION)
-     * @param _vaultShare Percentage going to totem vault (multiplied by PRECISION)
-     */
-    function setDistributionShares(
-        uint256 _revenueShare,
-        uint256 _creatorShare,
-        uint256 _poolShare,
-        uint256 _vaultShare
-    ) external onlyRole(MANAGER) {
-        if (
-            _revenueShare + _creatorShare + _poolShare + _vaultShare !=
-            PRECISION
-        ) revert InvalidShares();
-
-        revenuePaymentTokenShare = _revenueShare;
-        totemCreatorPaymentTokenShare = _creatorShare;
-        poolPaymentTokenShare = _poolShare;
-        vaultPaymentTokenShare = _vaultShare;
-
-        emit TokenDistributionSharesUpdated(
-            _revenueShare,
-            _creatorShare,
-            _poolShare,
-            _vaultShare
-        );
-    }
-
-    /**
-     * @notice Sets the token price in USD
-     * @param _priceInUsd New price in USD (18 decimals)
-     */
-    function setTotemPriceInUsd(
-        uint256 _priceInUsd
-    ) external onlyRole(MANAGER) {
-        if (_priceInUsd == 0) revert WrongAmount(0);
-        oneTotemPriceInUsd = _priceInUsd;
-    }
+    // VIEW FUNCTIONS
 
     /**
      * @notice Returns the token price in USD
@@ -576,8 +563,6 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     function getTotemPriceInUsd() external view returns (uint256) {
         return oneTotemPriceInUsd;
     }
-
-    /// READERS
 
     /**
      * @notice Converts totem tokens to payment tokens based on price
