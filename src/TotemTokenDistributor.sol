@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -22,7 +23,7 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
  *      adding liquidity to AMM pools, and burning totem tokens
  */
 
-contract TotemTokenDistributor is AccessControlUpgradeable {
+contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
 
     // State variables - Contracts
@@ -138,6 +139,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      */
     function initialize(address _registryAddr) public initializer {
         __AccessControl_init();
+        __Pausable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
@@ -165,7 +167,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      * @notice Being called by TotemFactory during totem creation
      *      Registers a new totem and distributes initial tokens
      */
-    function register() external {
+    function register() external whenNotPaused {
         if (address(factory) == address(0)) revert AlreadySet();
         if (msg.sender != address(factory)) revert OnlyFactory();
 
@@ -204,7 +206,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      * @param _totemTokenAddr Address of the totem token to buy
      * @param _totemTokenAmount Amount of totem tokens to buy
      */
-    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -270,7 +272,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
      * @param _totemTokenAddr Address of the totem token to sell
      * @param _totemTokenAmount Amount of totem tokens to sell
      */
-    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -317,6 +319,22 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     }
 
     // ADMIN FUNCTIONS
+
+    /**
+     * @notice Pauses the contract
+     * @dev Only callable by accounts with the MANAGER role
+     */
+    function pause() external onlyRole(MANAGER) {
+        _pause();
+    }
+
+    /**
+     * @notice Unpauses the contract
+     * @dev Only callable by accounts with the MANAGER role
+     */
+    function unpause() external onlyRole(MANAGER) {
+        _unpause();
+    }
 
     /**
      * @notice Sets the payment token address

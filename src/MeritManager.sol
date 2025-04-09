@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
@@ -15,8 +16,9 @@ import {Totem} from "./Totem.sol";
  * @title MeritManager
  * @notice Manages merit points for registered totems and distributes MYTHO tokens based on merit.
  * Includes features like totem registration, merit crediting, boosting, and claiming rewards.
+ * Contract can be paused in emergency situations.
  */
-contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
+contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
     using Address for address payable;
 
@@ -94,6 +96,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     ) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
+        __Pausable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
@@ -123,7 +126,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @notice Registers a new totem
      * @param _totemAddr Address of the totem to register
      */
-    function register(address _totemAddr) external {
+    function register(address _totemAddr) external whenNotPaused {
         if (!hasRole(REGISTRATOR, msg.sender)) revert AccessControl();
         if (registeredTotems[_totemAddr]) revert TotemAlreadyRegistered();
         if (_totemAddr == address(0)) revert InvalidAddress();
@@ -138,7 +141,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @notice Allows a user to boost a totem by paying a fee
      * @param _totemAddr Address of the totem to boost
      */
-    function boostTotem(address _totemAddr) external payable nonReentrant {
+    function boostTotem(address _totemAddr) external payable nonReentrant whenNotPaused {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
@@ -182,7 +185,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @notice Allows a totem to claim MYTHO tokens for a specific period
      * @param _periodNum Period number to claim for
      */
-    function claimMytho(uint256 _periodNum) external nonReentrant {
+    function claimMytho(uint256 _periodNum) external nonReentrant whenNotPaused {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
@@ -343,6 +346,22 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_registrator == address(0)) revert InvalidAddress();
         revokeRole(REGISTRATOR, _registrator);
+    }
+
+    /**
+     * @notice Pauses the contract
+     * @dev Only callable by MANAGER role
+     */
+    function pause() external onlyRole(MANAGER) {
+        _pause();
+    }
+
+    /**
+     * @notice Unpauses the contract
+     * @dev Only callable by MANAGER role
+     */
+    function unpause() external onlyRole(MANAGER) {
+        _unpause();
     }
 
     // INTERNAL FUNCTIONS
