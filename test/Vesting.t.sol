@@ -22,7 +22,7 @@ contract VestingTest is Test {
         prank(deployer);
         mytho = new MYTHO(deployer, deployer, deployer, deployer);
         vestingWallet = new VestingWallet(beneficiaryA, 100, 1000);
-        mytho.mint(address(vestingWallet), 100e18);
+        deal(address(mytho), address(vestingWallet), 100e18);
     }
 
     function test() public {
