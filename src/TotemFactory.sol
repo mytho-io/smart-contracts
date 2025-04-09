@@ -72,6 +72,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
     error ZeroAmount();
+    error EcosystemPaused();
 
     /**
      * @notice Initializes the TotemFactory contract
@@ -245,13 +246,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @notice Adds multiple tokens to the whitelist
      * @param _tokens Array of token addresses to whitelist
      */
-    function batchAddToWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
+    function batchAddToWhitelist(
+        address[] calldata _tokens
+    ) external onlyRole(MANAGER) {
         for (uint256 i = 0; i < _tokens.length; i++) {
             if (!hasRole(WHITELISTED, _tokens[i])) {
                 grantRole(WHITELISTED, _tokens[i]);
             }
         }
-        
+
         emit BatchWhitelistUpdated(_tokens, true);
     }
 
@@ -259,13 +262,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @notice Removes multiple tokens from the whitelist
      * @param _tokens Array of token addresses to remove from whitelist
      */
-    function batchRemoveFromWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
+    function batchRemoveFromWhitelist(
+        address[] calldata _tokens
+    ) external onlyRole(MANAGER) {
         for (uint256 i = 0; i < _tokens.length; i++) {
             if (hasRole(WHITELISTED, _tokens[i])) {
                 revokeRole(WHITELISTED, _tokens[i]);
             }
         }
-        
+
         emit BatchWhitelistUpdated(_tokens, false);
     }
 
@@ -276,7 +281,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function addTokenToWhitelist(address _token) public onlyRole(MANAGER) {
         if (hasRole(WHITELISTED, _token)) revert AlreadyWhitelisted(_token);
         grantRole(WHITELISTED, _token);
-        
+
         address[] memory tokens = new address[](1);
         tokens[0] = _token;
         emit BatchWhitelistUpdated(tokens, true);
@@ -289,7 +294,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function removeTokenFromWhitelist(address _token) public onlyRole(MANAGER) {
         if (!hasRole(WHITELISTED, _token)) revert NotWhitelisted(_token);
         revokeRole(WHITELISTED, _token);
-        
+
         address[] memory tokens = new address[](1);
         tokens[0] = _token;
         emit BatchWhitelistUpdated(tokens, false);
@@ -307,6 +312,16 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      */
     function unpause() public onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     // INTERNAL FUNCTIONS
