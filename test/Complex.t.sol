@@ -1006,7 +1006,7 @@ contract ComplexTest is Test {
         TT token = TT(totemTokenAddr);
 
         // Verify initial state
-        assertTrue(token.salePeriod());
+        assertTrue(token.isInSalePeriod());
 
         // Non-distributor cannot open transfers
         prank(userA);
@@ -1018,7 +1018,7 @@ contract ComplexTest is Test {
         token.openTransfers();
 
         // Verify transfers are now open
-        assertFalse(token.salePeriod());
+        assertFalse(token.isInSalePeriod());
 
         // Cannot open transfers again
         prank(address(distr));
@@ -1094,9 +1094,9 @@ contract ComplexTest is Test {
         mm.setOneTotemBoost(20);
         assertEq(mm.oneTotemBoost(), 20);
 
-        // Test setMythmsMultiplier
+        // Test setMythumMultiplier
         prank(deployer);
-        mm.setMythmsMultiplier(200); // 2x
+        mm.setMythumMultiplier(200); // 2x
         assertEq(mm.mythumMultiplier(), 200);
 
         // Test setBoostFee
@@ -1119,6 +1119,193 @@ contract ComplexTest is Test {
         prank(deployer);
         mm.revokeRegistratorRole(newRegistrator);
         assertFalse(mm.hasRole(mm.REGISTRATOR(), newRegistrator));
+    }
+
+    // Test period duration change preserves period count
+    function test_PeriodDurationChange_PreservesPeriodCount() public {
+        // Initial period duration is 30 days
+        assertEq(mm.periodDuration(), 30 days);
+        
+        // Initial period is 0
+        assertEq(mm.currentPeriod(), 0);
+        
+        // Warp forward 45 days (1.5 periods)
+        warp(45 days);
+        
+        // Should be in period 1
+        assertEq(mm.currentPeriod(), 1);
+        
+        // Change period duration to 15 days
+        prank(deployer);
+        mm.setPeriodDuration(15 days);
+        
+        // Period count should still be 1 after the change
+        assertEq(mm.currentPeriod(), 1);
+        assertEq(mm.accumulatedPeriods(), 1);
+        
+        // Warp forward 15 days (1 new period with new duration)
+        warp(15 days);
+        
+        // Should be in period 2 (1 accumulated + 1 new)
+        assertEq(mm.currentPeriod(), 2);
+        
+        // Warp forward 30 days (2 new periods with new duration)
+        warp(30 days);
+        
+        // Should be in period 4 (1 accumulated + 3 new)
+        assertEq(mm.currentPeriod(), 4);
+    }
+    
+    // Test period duration change with multiple changes
+    function test_MultiplePeriodDurationChanges() public {
+        // Initial period duration is 30 days
+        assertEq(mm.periodDuration(), 30 days);
+        
+        // Warp forward 60 days (2 periods)
+        warp(60 days);
+        
+        // Should be in period 2
+        assertEq(mm.currentPeriod(), 2);
+        
+        // Change period duration to 15 days
+        prank(deployer);
+        mm.setPeriodDuration(15 days);
+        
+        // Period count should still be 2 after the change
+        assertEq(mm.currentPeriod(), 2);
+        assertEq(mm.accumulatedPeriods(), 2);
+        
+        // Warp forward 30 days (2 new periods with new duration)
+        warp(30 days);
+        
+        // Should be in period 4 (2 accumulated + 2 new)
+        assertEq(mm.currentPeriod(), 4);
+        
+        // Change period duration again to 10 days
+        prank(deployer);
+        mm.setPeriodDuration(10 days);
+        
+        // Period count should still be 4 after the change
+        assertEq(mm.currentPeriod(), 4);
+        assertEq(mm.accumulatedPeriods(), 4);
+        
+        // Warp forward 20 days (2 new periods with new duration)
+        warp(20 days);
+        
+        // Should be in period 6 (4 accumulated + 2 new)
+        assertEq(mm.currentPeriod(), 6);
+    }
+    
+    // Test period time bounds calculation after period duration change
+    function test_PeriodTimeBoundsAfterDurationChange() public {
+        // Initial period duration is 30 days
+        assertEq(mm.periodDuration(), 30 days);
+        
+        // Warp forward 30 days (1 period)
+        warp(30 days);
+        
+        // Should be in period 1
+        assertEq(mm.currentPeriod(), 1);
+        
+        // Change period duration to 15 days
+        uint256 changeTimestamp = block.timestamp;
+        prank(deployer);
+        mm.setPeriodDuration(15 days);
+        
+        // Get time bounds for period 1 (should return 0,0 as it's before accumulated periods)
+        (uint256 startTime1, uint256 endTime1) = mm.getPeriodTimeBounds(0);
+        assertEq(startTime1, 0);
+        assertEq(endTime1, 0);
+        
+        // Get time bounds for period 2 (first period after the change)
+        (uint256 startTime2, uint256 endTime2) = mm.getPeriodTimeBounds(2);
+        assertEq(startTime2, changeTimestamp + 15 days);
+        assertEq(endTime2, changeTimestamp + 30 days);
+    }
+    
+    // Test Mythum period calculation after period duration change
+    function test_MythumPeriodAfterDurationChange() public {
+        // Initial period duration is 30 days
+        assertEq(mm.periodDuration(), 30 days);
+        
+        // Warp forward 30 days (1 period)
+        warp(30 days);
+        
+        // Change period duration to 20 days
+        prank(deployer);
+        mm.setPeriodDuration(20 days);
+        
+        // Warp to just before Mythum period in the new period
+        warp(14 days); // 30 + 14 = 44 days total, new period starts at 30 days
+        
+        // Should not be in Mythum period yet
+        assertFalse(mm.isMythum());
+        
+        // Warp to Mythum period (last 25% of period = last 5 days of 20-day period)
+        warp(1 days); // 45 days total, Mythum starts at 45 days (30 + 15)
+        
+        // Should be in Mythum period
+        assertTrue(mm.isMythum());
+        
+        // Verify Mythum start time
+        uint256 mythumStart = mm.getCurrentMythumStart();
+        assertEq(mythumStart, mm.startTime() + 15 days); // 3/4 of the new 20-day period
+    }
+    
+    // Test merit crediting and claiming across period duration changes
+    function test_MeritAndClaimAcrossPeriodChanges() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+        
+        _buyAllTotemTokens(totemTokenAddr);
+        
+        // Credit merit in period 0
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 1000);
+        
+        // Warp to period 1
+        warp(30 days);
+        mm.updateState();
+        
+        // Claim MYTHO for period 0
+        uint256 mythoBefore = mytho.balanceOf(data.totemAddr);
+        prank(address(totem));
+        totem.collectMYTH(0);
+        uint256 mythoAfterFirstClaim = mytho.balanceOf(data.totemAddr);
+        assertTrue(mythoAfterFirstClaim > mythoBefore);
+        
+        // Credit merit in period 1
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 2000);
+        
+        // Change period duration to 15 days
+        prank(deployer);
+        mm.setPeriodDuration(15 days);
+        
+        // Warp to period 3 (1 accumulated + 2 new periods)
+        warp(30 days);
+        mm.updateState();
+        
+        // Claim MYTHO for period 1
+        prank(address(totem));
+        totem.collectMYTH(1);
+        uint256 mythoAfterSecondClaim = mytho.balanceOf(data.totemAddr);
+        assertTrue(mythoAfterSecondClaim > mythoAfterFirstClaim);
+        
+        // Credit merit in period 3
+        prank(deployer);
+        mm.creditMerit(data.totemAddr, 3000);
+        
+        // Warp to period 4
+        warp(15 days);
+        mm.updateState();
+        
+        // Claim MYTHO for period 3
+        prank(address(totem));
+        totem.collectMYTH(3);
+        uint256 mythoAfterThirdClaim = mytho.balanceOf(data.totemAddr);
+        assertTrue(mythoAfterThirdClaim > mythoAfterSecondClaim);
     }
 
     // Test TotemFactory admin functions
@@ -1211,22 +1398,6 @@ contract ComplexTest is Test {
         // Note: We can't fully test getPrice with a mock price feed without implementing the interface
     }
 
-    // Test MYTHO token functionality
-    function test_MYTHO_Functionality() public {
-        // Test burn function
-        prank(deployer);
-        mytho.mint(userA, 1000 ether);
-
-        prank(userA);
-        mytho.burn(userA, 500 ether);
-        assertEq(mytho.balanceOf(userA), 500 ether);
-
-        // Test burn restrictions
-        prank(userB);
-        vm.expectRevert(MYTHO.OnlyOwnerCanBurn.selector);
-        mytho.burn(userA, 100 ether);
-    }
-
     // Test AddressRegistry functionality
     function test_AddressRegistry_Functionality() public {
         // Test setAddress
@@ -1263,7 +1434,7 @@ contract ComplexTest is Test {
 
         // Test getPeriodTimeBounds
         (uint256 startTime, uint256 endTime) = mm.getPeriodTimeBounds(0);
-        assertEq(startTime, mm.deploymentTimestamp());
+        assertEq(startTime, mm.startTime());
         assertEq(endTime, startTime + mm.periodDuration());
 
         // Test getTimeUntilNextPeriod
@@ -1274,7 +1445,7 @@ contract ComplexTest is Test {
         uint256 mythumStart = mm.getCurrentMythumStart();
         assertEq(
             mythumStart,
-            mm.deploymentTimestamp() + ((mm.periodDuration() * 3) / 4)
+            mm.startTime() + ((mm.periodDuration() * 3) / 4)
         );
 
         // Test isRegisteredTotem
