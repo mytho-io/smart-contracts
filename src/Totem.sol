@@ -61,6 +61,19 @@ contract Totem is AccessControlUpgradeable {
     error ZeroAmount();
     error ZeroCirculatingSupply();
     error InvalidParams();
+    error TotemsPaused();
+    error EcosystemPaused();
+
+    /**
+     * @notice Modifier to check if Totems are paused or if the ecosystem is paused in the AddressRegistry
+     */
+    modifier whenNotPaused() {
+        if (AddressRegistry(registryAddr).areTotemsPaused())
+            revert TotemsPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused())
+            revert EcosystemPaused();
+        _;
+    }
 
     /**
      * @notice Initializes the Totem contract with token addresses, data hash, and revenue pool
@@ -123,7 +136,7 @@ contract Totem is AccessControlUpgradeable {
      *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens based on circulating supply.
      * @param _totemTokenAmount The amount of TotemToken to burn or transfer
      */
-    function burnTotemTokens(uint256 _totemTokenAmount) external {
+    function burnTotemTokens(uint256 _totemTokenAmount) external whenNotPaused {
         if (!isCustomToken && !salePeriodEnded) revert SalePeriodNotEnded();
         if (totemToken.balanceOf(msg.sender) < _totemTokenAmount)
             revert InsufficientTotemBalance();
@@ -198,7 +211,7 @@ contract Totem is AccessControlUpgradeable {
      * @notice Collects accumulated MYTHO from MeritManager for a specific period
      * @param _periodNum The period number to collect rewards for
      */
-    function collectMYTH(uint256 _periodNum) public {
+    function collectMYTH(uint256 _periodNum) public whenNotPaused {
         MeritManager(meritManagerAddr).claimMytho(_periodNum);
         emit MythoCollected(msg.sender, _periodNum);
     }
@@ -212,7 +225,7 @@ contract Totem is AccessControlUpgradeable {
     function closeSalePeriod(
         IERC20 _paymentToken,
         IERC20 _liquidityToken
-    ) external onlyRole(TOTEM_DISTRIBUTOR) {
+    ) external onlyRole(TOTEM_DISTRIBUTOR) whenNotPaused {
         paymentToken = _paymentToken;
         liquidityToken = _liquidityToken;
         salePeriodEnded = true;
