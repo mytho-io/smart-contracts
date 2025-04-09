@@ -7,6 +7,7 @@ import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol"
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import {ERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 
 import {MeritManager as MM} from "../src/MeritManager.sol";
 import {TotemFactory as TF} from "../src/TotemFactory.sol";
@@ -1308,6 +1309,101 @@ contract ComplexTest is Test {
         assertTrue(mythoAfterThirdClaim > mythoAfterSecondClaim);
     }
 
+    // Test pause functionality in TotemTokenDistributor
+    function test_TotemTokenDistributor_PauseFunctionality() public {
+        address totemTokenAddr = _createTotem(userA);
+        
+        // Test pause functionality
+        prank(deployer);
+        distr.pause();
+        
+        // Verify buying is blocked when paused
+        prank(userA);
+        paymentToken.approve(address(distr), 100 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        distr.buy(totemTokenAddr, 100 ether);
+        
+        // Verify selling is blocked when paused
+        prank(userA);
+        IERC20(totemTokenAddr).approve(address(distr), 100 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        distr.sell(totemTokenAddr, 100 ether);
+        
+        // Verify registration is blocked when paused
+        prank(address(factory));
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        distr.register();
+        
+        // Unpause and verify operations work again
+        prank(deployer);
+        distr.unpause();
+        
+        // Buy should work after unpausing
+        prank(userA);
+        paymentToken.approve(address(distr), 100 ether);
+        distr.buy(totemTokenAddr, 100 ether);
+        
+        // Verify access control for pause/unpause
+        prank(userA);
+        vm.expectRevert();
+        distr.pause();
+        
+        prank(userA);
+        vm.expectRevert();
+        distr.unpause();
+    }
+    
+    // Test pause functionality in MeritManager
+    function test_MeritManager_PauseFunctionality() public {
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        
+        // End sale period to allow transfers
+        _buyAllTotemTokens(totemTokenAddr);
+        
+        // Warp to Mythus period (last 25% of period)
+        warp(23 days);
+        
+        // Test pause functionality
+        prank(deployer);
+        mm.pause();
+        
+        // Verify boostTotem is blocked when paused
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Verify register is blocked when paused
+        address newTotem = makeAddr("newTotem");
+        prank(address(distr));
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        mm.register(newTotem);
+        
+        // Verify claimMytho is blocked when paused
+        prank(address(data.totemAddr));
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        mm.claimMytho(0);
+        
+        // Unpause and verify operations work again
+        prank(deployer);
+        mm.unpause();
+        
+        // Boost should work after unpausing
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Verify access control for pause/unpause
+        prank(userA);
+        vm.expectRevert();
+        mm.pause();
+        
+        prank(userA);
+        vm.expectRevert();
+        mm.unpause();
+    }
+    
     // Test TotemFactory admin functions
     function test_TotemFactory_AdminFunctions() public {
         // Test setCreationFee
@@ -1415,7 +1511,217 @@ contract ComplexTest is Test {
         assertEq(registry.getTotemFactory(), address(factory));
         assertEq(registry.getTotemTokenDistributor(), address(distr));
     }
+    
+    // Test ecosystem pause functionality
+    function test_EcosystemPause_Functionality() public {
+        // Create a totem for testing
+        address totemTokenAddr = _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+        
+        // Verify initial state
+        assertFalse(registry.isEcosystemPaused());
+        
+        // Pause the ecosystem
+        prank(deployer);
+        registry.setEcosystemPaused(true);
+        
+        // Verify ecosystem is paused
+        assertTrue(registry.isEcosystemPaused());
+        
+        // Test access control for ecosystem pause
+        prank(userA);
+        vm.expectRevert();
+        registry.setEcosystemPaused(false);
+        
+        // Verify MeritManager respects ecosystem pause
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        vm.expectRevert(MM.EcosystemPaused.selector);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // Verify TotemTokenDistributor respects ecosystem pause
+        prank(userA);
+        paymentToken.approve(address(distr), 100 ether);
+        vm.expectRevert(TTD.EcosystemPaused.selector);
+        distr.buy(totemTokenAddr, 100 ether);
+        
+        // Verify TotemFactory respects ecosystem pause
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        vm.expectRevert(TF.EcosystemPaused.selector);
+        factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
+        
+        // Verify Totem respects ecosystem pause
+        _buyAllTotemTokens(totemTokenAddr);
+        prank(userA);
+        IERC20(totemTokenAddr).approve(data.totemAddr, 50 ether);
+        vm.expectRevert(Totem.EcosystemPaused.selector);
+        totem.burnTotemTokens(50 ether);
+        
+        // Unpause the ecosystem
+        prank(deployer);
+        registry.setEcosystemPaused(false);
+        
+        // Verify ecosystem is unpaused
+        assertFalse(registry.isEcosystemPaused());
+        
+        // Verify operations work again after unpausing
+        
+        // MeritManager operation should work
+        warp(23 days); // Move to Mythum period
+        vm.deal(userA, 1 ether);
+        prank(userA);
+        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
+        
+        // TotemTokenDistributor operation should work
+        prank(userB);
+        paymentToken.approve(address(distr), 100 ether);
+        distr.buy(totemTokenAddr, 100 ether);
+        
+        // TotemFactory operation should work
+        prank(userB);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
+        
+        // Totem operation should work
+        prank(userA);
+        IERC20(totemTokenAddr).approve(data.totemAddr, 50 ether);
+        totem.burnTotemTokens(50 ether);
+    }
+    
+    // Test interaction between contract-specific pause and ecosystem pause
+    function test_ContractPause_And_EcosystemPause_Interaction() public {
+        // Create a totem for testing
+        address totemTokenAddr = _createTotem(userA);
+        
+        // Pause only TotemTokenDistributor
+        prank(deployer);
+        distr.pause();
+        
+        // Verify TotemTokenDistributor operations are blocked
+        prank(userA);
+        paymentToken.approve(address(distr), 100 ether);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        distr.buy(totemTokenAddr, 100 ether);
+        
+        // Verify other contracts still work
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
+        
+        // Now pause the ecosystem
+        prank(deployer);
+        registry.setEcosystemPaused(true);
+        
+        // Verify all contracts are blocked
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        vm.expectRevert(TF.EcosystemPaused.selector);
+        factory.createTotem("dataHash3", "TotemToken3", "TT3", new address[](0));
+        
+        // Unpause TotemTokenDistributor but keep ecosystem paused
+        prank(deployer);
+        distr.unpause();
+        
+        // Verify TotemTokenDistributor is still blocked due to ecosystem pause
+        prank(userA);
+        paymentToken.approve(address(distr), 100 ether);
+        vm.expectRevert(TTD.EcosystemPaused.selector);
+        distr.buy(totemTokenAddr, 100 ether);
+        
+        // Unpause ecosystem
+        prank(deployer);
+        registry.setEcosystemPaused(false);
+        
+        // Verify TotemTokenDistributor now works
+        prank(userA);
+        paymentToken.approve(address(distr), 100 ether);
+        distr.buy(totemTokenAddr, 100 ether);
+    }
 
+    // Test setTotemsPaused functionality
+    function test_SetTotemsPaused_Functionality() public {
+        // Create multiple totems for testing
+        address totemToken1 = _createTotem(userA);
+        address totemToken2 = _createTotem(userB);
+        address totemToken3 = _createTotem(userC);
+        
+        TF.TotemData memory data1 = factory.getTotemData(0);
+        TF.TotemData memory data2 = factory.getTotemData(1);
+        TF.TotemData memory data3 = factory.getTotemData(2);
+        
+        Totem totem1 = Totem(data1.totemAddr);
+        Totem totem2 = Totem(data2.totemAddr);
+        Totem totem3 = Totem(data3.totemAddr);
+        
+        // End sale period for all totems to allow burning tokens
+        _buyAllTotemTokens(totemToken1);
+        _buyAllTotemTokens(totemToken2);
+        _buyAllTotemTokens(totemToken3);
+        
+        // Verify initial state
+        assertFalse(registry.areTotemsPaused());
+        
+        // Test access control: non-manager should fail
+        prank(userA);
+        vm.expectRevert();
+        registry.setTotemsPaused(true);
+        
+        // Pause all totems at once
+        prank(deployer);
+        registry.setTotemsPaused(true);
+        
+        // Verify totems are paused
+        assertTrue(registry.areTotemsPaused());
+        
+        // Verify operations on first totem are blocked when totems are paused
+        prank(userA);
+        IERC20(totemToken1).approve(data1.totemAddr, 50 ether);
+        vm.expectRevert(Totem.TotemsPaused.selector);
+        totem1.burnTotemTokens(50 ether);
+        
+        // Verify operations on second totem are blocked when totems are paused
+        prank(userB);
+        IERC20(totemToken2).approve(data2.totemAddr, 50 ether);
+        vm.expectRevert(Totem.TotemsPaused.selector);
+        totem2.burnTotemTokens(50 ether);
+        
+        // Verify operations on third totem are blocked when totems are paused
+        prank(userC);
+        IERC20(totemToken3).approve(data3.totemAddr, 50 ether);
+        vm.expectRevert(Totem.TotemsPaused.selector);
+        totem3.burnTotemTokens(50 ether);
+        
+        // Verify other contracts still work (not affected by totems pause)
+        // Create a new totem to verify factory still works
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        factory.createTotem("dataHash4", "TotemToken4", "TT4", new address[](0));
+        
+        // Unpause all totems at once
+        prank(deployer);
+        registry.setTotemsPaused(false);
+        
+        // Verify totems are unpaused
+        assertFalse(registry.areTotemsPaused());
+        
+        // Verify operations on first totem work again
+        prank(userA);
+        IERC20(totemToken1).approve(data1.totemAddr, 50 ether);
+        totem1.burnTotemTokens(50 ether);
+        
+        // Verify operations on second totem work again
+        prank(userB);
+        IERC20(totemToken2).approve(data2.totemAddr, 50 ether);
+        totem2.burnTotemTokens(50 ether);
+        
+        // Verify operations on third totem work again
+        prank(userC);
+        IERC20(totemToken3).approve(data3.totemAddr, 50 ether);
+        totem3.burnTotemTokens(50 ether);
+    }
+    
     // Test MeritManager view functions
     function test_MeritManager_ViewFunctions() public {
         address totemTokenAddr = _createTotem(userA);
