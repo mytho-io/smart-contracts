@@ -21,16 +21,17 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using Address for address payable;
 
     // State variables
-    address public mythoToken;
-    address public treasuryAddr;
-    address[4] public vestingWallets;
-    uint256[4] public vestingWalletsAllocation;
+    address private mythoToken;
+    address private treasuryAddr;
+    address[4] private vestingWallets;
+    uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
     uint256 public periodDuration;
-    uint256 public deploymentTimestamp;
+    uint256 public startTime; // Initially set to deployment timestamp, updated when period duration changes
     uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
     uint256 public lastProcessedPeriod; // Last period that was fully processed
+    uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
     address[] public registeredTotemsList; // Array to track all registered totems
 
     // Mappings
@@ -102,7 +103,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         vestingWallets = _vestingWallets;
         periodDuration = 30 days;
-        deploymentTimestamp = block.timestamp;
+        startTime = block.timestamp; // Initially set to deployment timestamp
+        accumulatedPeriods = 0;
         vestingWalletsAllocation = [
             175_000_000 ether,
             125_000_000 ether,
@@ -110,7 +112,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             50_000_000 ether
         ];
 
-        oneTotemBoost = 10; // 10 merit points per boost
+        oneTotemBoost = 10; // 10 merit points per boost initially
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
         boostFee = 0.001 ether; // 0.001 native tokens for boost fee
     }
@@ -130,33 +132,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         registeredTotemsList.push(_totemAddr);
 
         emit TotemRegistered(_totemAddr);
-    }
-
-    /**
-     * @notice Credits merit points to a registered totem
-     * @param _totemAddr Address of the totem to credit
-     * @param _amount Amount of merit points to credit
-     */
-    function creditMerit(
-        address _totemAddr,
-        uint256 _amount
-    ) external onlyRole(MANAGER) {
-        if (_amount == 0) revert ZeroAmount();
-        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
-
-        uint256 currentPeriod_ = currentPeriod();
-
-        // Apply Mythum multiplier if in Mythum period
-        if (isMythum()) {
-            _amount = (_amount * mythumMultiplier) / 100;
-        }
-
-        // Add merit to the totem
-        totemMerit[currentPeriod_][_totemAddr] += _amount;
-        totalMeritPoints[currentPeriod_] += _amount;
-
-        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
     }
 
     /**
@@ -235,6 +210,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit MythoClaimed(totemAddr, totemShare, _periodNum);
     }
 
+    // ADMIN FUNCTIONS
+
     /**
      * @notice Manually triggers state update
      */
@@ -242,7 +219,32 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         _updateState();
     }
 
-    // ADMIN FUNCTIONS
+    /**
+     * @notice Credits merit points to a registered totem
+     * @param _totemAddr Address of the totem to credit
+     * @param _amount Amount of merit points to credit
+     */
+    function creditMerit(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (_amount == 0) revert ZeroAmount();
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+
+        uint256 currentPeriod_ = currentPeriod();
+
+        // Apply Mythum multiplier if in Mythum period
+        if (isMythum()) {
+            _amount = (_amount * mythumMultiplier) / 100;
+        }
+
+        // Add merit to the totem
+        totemMerit[currentPeriod_][_totemAddr] += _amount;
+        totalMeritPoints[currentPeriod_] += _amount;
+
+        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
+    }
 
     /**
      * @notice Sets the blacklist status for a totem
@@ -310,16 +312,21 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newPeriodDuration == 0) revert InvalidPeriodDuration();
         _updateState();
+        
+        // Store the current period count before changing the duration
+        accumulatedPeriods = currentPeriod();
+        startTime = block.timestamp; // Reset the start time to now
+        
         periodDuration = _newPeriodDuration;
         lastProcessedPeriod = currentPeriod();
         emit ParameterUpdated("periodDuration", _newPeriodDuration);
     }
 
-/**
- * @notice Grants the registrator role to an address
- * @param _registrator Address to grant the role to
- * @notice This role is given to TotemFactory and TotemTokenDistributor contracts
- */
+    /**
+     * @notice Grants the registrator role to an address
+     * @param _registrator Address to grant the role to
+     * @notice This role is given to TotemFactory and TotemTokenDistributor contracts
+     */
     function grantRegistratorRole(
         address _registrator
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -371,7 +378,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             }
 
             wallet.release(address(mythoToken));
-            lastProcessedPeriod = _currentPeriod; // Set the last processed period to the previous period
+            lastProcessedPeriod = _currentPeriod;
         }
     }
 
@@ -382,8 +389,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Current period number
      */
     function currentPeriod() public view returns (uint256) {
-        if (block.timestamp < deploymentTimestamp) return 0;
-        return (block.timestamp - deploymentTimestamp) / periodDuration;
+        if (block.timestamp < startTime) return accumulatedPeriods;
+        return accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
     }
 
     /**
@@ -391,8 +398,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Whether current time is in Mythum period
      */
     function isMythum() public view returns (bool) {
-        uint256 currentPeriodStart = deploymentTimestamp +
-            (currentPeriod() * periodDuration);
+        uint256 currentPeriodNumber = currentPeriod();
+        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
+        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
         return block.timestamp >= mythumStart;
     }
@@ -452,15 +460,22 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     /**
      * @notice Gets the period time bounds
      * @param _periodNum Period number to check
-     * @return startTime Period start timestamp
+     * @return periodStartTime Period start timestamp
      * @return endTime Period end timestamp
      */
     function getPeriodTimeBounds(
         uint256 _periodNum
-    ) external view returns (uint256 startTime, uint256 endTime) {
-        startTime = deploymentTimestamp + (_periodNum * periodDuration);
-        endTime = startTime + periodDuration;
-        return (startTime, endTime);
+    ) external view returns (uint256 periodStartTime, uint256 endTime) {
+        // For periods before the accumulated periods, we can't accurately determine bounds
+        // since the period duration might have changed
+        if (_periodNum < accumulatedPeriods) {
+            return (0, 0); // Indicate that we can't determine bounds for historical periods
+        }
+        
+        uint256 periodsAfterAccumulation = _periodNum - accumulatedPeriods;
+        periodStartTime = startTime + (periodsAfterAccumulation * periodDuration);
+        endTime = periodStartTime + periodDuration;
+        return (periodStartTime, endTime);
     }
 
     /**
@@ -468,12 +483,14 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Time in seconds until the next period
      */
     function getTimeUntilNextPeriod() external view returns (uint256) {
-        uint256 currentPeriodEnd = deploymentTimestamp +
-            ((currentPeriod() + 1) * periodDuration);
-        if (block.timestamp >= currentPeriodEnd) {
+        uint256 currentPeriodNumber = currentPeriod();
+        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
+        uint256 nextPeriodStart = startTime + ((periodsAfterAccumulation + 1) * periodDuration);
+        
+        if (block.timestamp >= nextPeriodStart) {
             return 0;
         }
-        return currentPeriodEnd - block.timestamp;
+        return nextPeriodStart - block.timestamp;
     }
 
     /**
@@ -481,8 +498,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return Timestamp of the current Mythum period start
      */
     function getCurrentMythumStart() external view returns (uint256) {
-        uint256 currentPeriodStart = deploymentTimestamp +
-            (currentPeriod() * periodDuration);
+        uint256 currentPeriodNumber = currentPeriod();
+        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
+        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
         return currentPeriodStart + ((periodDuration * 3) / 4);
     }
 
