@@ -18,13 +18,18 @@ import {Totem} from "./Totem.sol";
  * Includes features like totem registration, merit crediting, boosting, and claiming rewards.
  * Contract can be paused in emergency situations.
  */
-contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+contract MeritManager is
+    AccessControlUpgradeable,
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable
+{
     using SafeERC20 for IERC20;
     using Address for address payable;
 
     // State variables
     address private mythoToken;
     address private treasuryAddr;
+    address private registryAddr;
     address[4] private vestingWallets;
     uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
@@ -84,6 +89,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
     error InsufficientTotemBalance();
     error InvalidPeriodDuration();
     error ZeroAmount();
+    error EcosystemPaused();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -101,6 +107,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
 
+        registryAddr = _registryAddr;
         mythoToken = AddressRegistry(_registryAddr).getMythoToken();
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
 
@@ -141,7 +148,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      * @notice Allows a user to boost a totem by paying a fee
      * @param _totemAddr Address of the totem to boost
      */
-    function boostTotem(address _totemAddr) external payable nonReentrant whenNotPaused {
+    function boostTotem(
+        address _totemAddr
+    ) external payable nonReentrant whenNotPaused {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
@@ -185,7 +194,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      * @notice Allows a totem to claim MYTHO tokens for a specific period
      * @param _periodNum Period number to claim for
      */
-    function claimMytho(uint256 _periodNum) external nonReentrant whenNotPaused {
+    function claimMytho(
+        uint256 _periodNum
+    ) external nonReentrant whenNotPaused {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
@@ -315,11 +326,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newPeriodDuration == 0) revert InvalidPeriodDuration();
         _updateState();
-        
+
         // Store the current period count before changing the duration
         accumulatedPeriods = currentPeriod();
         startTime = block.timestamp; // Reset the start time to now
-        
+
         periodDuration = _newPeriodDuration;
         lastProcessedPeriod = currentPeriod();
         emit ParameterUpdated("periodDuration", _newPeriodDuration);
@@ -362,6 +373,16 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function unpause() external onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     // INTERNAL FUNCTIONS
@@ -409,7 +430,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function currentPeriod() public view returns (uint256) {
         if (block.timestamp < startTime) return accumulatedPeriods;
-        return accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
+        return
+            accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
     }
 
     /**
@@ -418,8 +440,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function isMythum() public view returns (bool) {
         uint256 currentPeriodNumber = currentPeriod();
-        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
-        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
+        uint256 periodsAfterAccumulation = currentPeriodNumber -
+            accumulatedPeriods;
+        uint256 currentPeriodStart = startTime +
+            (periodsAfterAccumulation * periodDuration);
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
         return block.timestamp >= mythumStart;
     }
@@ -490,9 +514,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
         if (_periodNum < accumulatedPeriods) {
             return (0, 0); // Indicate that we can't determine bounds for historical periods
         }
-        
+
         uint256 periodsAfterAccumulation = _periodNum - accumulatedPeriods;
-        periodStartTime = startTime + (periodsAfterAccumulation * periodDuration);
+        periodStartTime =
+            startTime +
+            (periodsAfterAccumulation * periodDuration);
         endTime = periodStartTime + periodDuration;
         return (periodStartTime, endTime);
     }
@@ -503,9 +529,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function getTimeUntilNextPeriod() external view returns (uint256) {
         uint256 currentPeriodNumber = currentPeriod();
-        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
-        uint256 nextPeriodStart = startTime + ((periodsAfterAccumulation + 1) * periodDuration);
-        
+        uint256 periodsAfterAccumulation = currentPeriodNumber -
+            accumulatedPeriods;
+        uint256 nextPeriodStart = startTime +
+            ((periodsAfterAccumulation + 1) * periodDuration);
+
         if (block.timestamp >= nextPeriodStart) {
             return 0;
         }
@@ -518,8 +546,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function getCurrentMythumStart() external view returns (uint256) {
         uint256 currentPeriodNumber = currentPeriod();
-        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
-        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
+        uint256 periodsAfterAccumulation = currentPeriodNumber -
+            accumulatedPeriods;
+        uint256 currentPeriodStart = startTime +
+            (periodsAfterAccumulation * periodDuration);
         return currentPeriodStart + ((periodDuration * 3) / 4);
     }
 
