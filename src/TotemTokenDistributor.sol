@@ -569,6 +569,14 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         oneTotemPriceInUsd = _priceInUsd;
     }
 
+    /**
+     * @notice Returns the token price in USD
+     * @return The current token price in USD (18 decimals)
+     */
+    function getTotemPriceInUsd() external view returns (uint256) {
+        return oneTotemPriceInUsd;
+    }
+
     /// READERS
 
     /**

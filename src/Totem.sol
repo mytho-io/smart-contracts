@@ -32,12 +32,13 @@ contract Totem is AccessControlUpgradeable {
     address private treasuryAddr;
     address private totemDistributorAddr;
     address private meritManagerAddr;
-    address public owner;
-    address[] public collaborators;
+    address private owner;
+    address[] private collaborators;
+    address private registryAddr;
 
     // State variables - Flags
     bool private isCustomToken;
-    bool public salePeriodEnded;
+    bool private salePeriodEnded;
 
     // Constants
     bytes32 private constant TOTEM_DISTRIBUTOR = keccak256("TOTEM_DISTRIBUTOR");
@@ -95,10 +96,11 @@ contract Totem is AccessControlUpgradeable {
         totemDistributorAddr = AddressRegistry(_registryAddr)
             .getTotemTokenDistributor();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
-        mythoToken = IERC20(MeritManager(meritManagerAddr).mythoToken());
+        mythoToken = IERC20(AddressRegistry(_registryAddr).getMythoToken());
 
         isCustomToken = _isCustomToken;
         salePeriodEnded = false; // Initially, sale period is active
+        registryAddr = _registryAddr;
 
         // Set owner and collaborators
         owner = _owner;
@@ -276,7 +278,7 @@ contract Totem is AccessControlUpgradeable {
             ? liquidityToken.balanceOf(address(this))
             : 0;
 
-        address mythoAddr = MeritManager(meritManagerAddr).mythoToken();
+        address mythoAddr = AddressRegistry(registryAddr).getMythoToken();
         mythoBalance = mythoAddr != address(0)
             ? IERC20(mythoAddr).balanceOf(address(this))
             : 0;
@@ -290,6 +292,40 @@ contract Totem is AccessControlUpgradeable {
      */
     function isCustomTotemToken() external view returns (bool) {
         return isCustomToken;
+    }
+
+    /**
+     * @notice Get the owner of this Totem
+     * @return The address of the Totem owner
+     */
+    function getOwner() external view returns (address) {
+        return owner;
+    }
+
+    /**
+     * @notice Get the collaborator at the specified index
+     * @param _index Index in the collaborators array
+     * @return The address of the collaborator
+     */
+    function getCollaborator(uint256 _index) external view returns (address) {
+        require(_index < collaborators.length, "Index out of bounds");
+        return collaborators[_index];
+    }
+
+    /**
+     * @notice Get all collaborators of this Totem
+     * @return Array of collaborator addresses
+     */
+    function getAllCollaborators() external view returns (address[] memory) {
+        return collaborators;
+    }
+
+    /**
+     * @notice Check if the sale period has ended
+     * @return True if the sale period has ended, false otherwise
+     */
+    function isSalePeriodEnded() external view returns (bool) {
+        return salePeriodEnded;
     }
 
     /**

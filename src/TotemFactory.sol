@@ -102,7 +102,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         registryAddr = _registryAddr;
 
         feeTokenAddr = _feeTokenAddr;
-        creationFee = 1 ether;
+        creationFee = 1 ether; // Initial fee
     }
 
     // EXTERNAL FUNCTIONS

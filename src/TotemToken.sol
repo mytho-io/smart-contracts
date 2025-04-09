@@ -12,7 +12,7 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
  */
 contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
     // State variables
-    bool public salePeriod; // Indicates if the token is in the sale period (transfers restricted)
+    bool private salePeriod; // Indicates if the token is in the sale period (transfers restricted)
 
     // Immutable variables
     address public immutable totemDistributor; // Address of the distributor, the only one who can transfer tokens during sale period
@@ -63,6 +63,16 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
 
         salePeriod = false;
         emit SalePeriodEnded();
+    }
+
+    // VIEW FUNCTIONS
+
+    /**
+     * @notice Checks if the token is in the sale period
+     * @return True if the token is in the sale period, false otherwise
+     */
+    function isInSalePeriod() external view returns (bool) {
+        return salePeriod;
     }
 
     // INTERNAL FUNCTIONS
