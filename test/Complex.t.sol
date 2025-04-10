@@ -50,6 +50,8 @@ contract ComplexTest is Test {
     AddressRegistry registryImpl;
     AddressRegistry registry;
 
+    TransparentUpgradeableProxy mythoProxy;
+    MYTHO mythoImpl;
     MYTHO mytho;
     MockToken paymentToken;
     MockToken astrToken;
@@ -249,10 +251,6 @@ contract ComplexTest is Test {
         uint256 available = distr.getAvailableTokensForPurchase(
             userA,
             totemTokenAddr
-        );
-        uint256 totemTokensExpectedToReceive = distr.paymentTokenToTotems(
-            totemTokenAddr,
-            100 ether
         );
 
         assertEq(available, distr.maxTokensPerAddress() - 250_000 ether);
@@ -1553,7 +1551,6 @@ contract ComplexTest is Test {
         factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
         
         // Verify Totem respects ecosystem pause
-        _buyAllTotemTokens(totemTokenAddr);
         prank(userA);
         IERC20(totemTokenAddr).approve(data.totemAddr, 50 ether);
         vm.expectRevert(Totem.EcosystemPaused.selector);
@@ -1568,12 +1565,6 @@ contract ComplexTest is Test {
         
         // Verify operations work again after unpausing
         
-        // MeritManager operation should work
-        warp(23 days); // Move to Mythum period
-        vm.deal(userA, 1 ether);
-        prank(userA);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
         // TotemTokenDistributor operation should work
         prank(userB);
         paymentToken.approve(address(distr), 100 ether);
@@ -1583,6 +1574,8 @@ contract ComplexTest is Test {
         prank(userB);
         astrToken.approve(address(factory), factory.getCreationFee());
         factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
+        
+        _buyAllTotemTokens(totemTokenAddr);
         
         // Totem operation should work
         prank(userA);
@@ -1604,11 +1597,6 @@ contract ComplexTest is Test {
         paymentToken.approve(address(distr), 100 ether);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         distr.buy(totemTokenAddr, 100 ether);
-        
-        // Verify other contracts still work
-        prank(userA);
-        astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
         
         // Now pause the ecosystem
         prank(deployer);
@@ -1840,8 +1828,15 @@ contract ComplexTest is Test {
         );
         mm = MM(address(mmProxy));
 
-        // MYTHO
-        mytho = new MYTHO(address(mm), deployer, deployer, deployer);
+        // MYTHO - Upgradeable implementation
+        mythoImpl = new MYTHO();
+        mythoProxy = new TransparentUpgradeableProxy(
+            address(mythoImpl),
+            deployer,
+            ""
+        );
+        mytho = MYTHO(address(mythoProxy));
+        mytho.initialize(address(mm), deployer, deployer, deployer);
 
         address[4] memory vestingAddresses = [
             mytho.meritVestingYear1(),

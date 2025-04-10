@@ -5,9 +5,12 @@ import "forge-std/Test.sol";
 
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {MYTHO} from "../src/MYTHO.sol";
 
 contract VestingTest is Test {
+    TransparentUpgradeableProxy mythoProxy;
+    MYTHO mythoImpl;
     MYTHO mytho;
 
     VestingWallet vestingWallet;
@@ -20,7 +23,14 @@ contract VestingTest is Test {
         beneficiaryA = makeAddr("beneficiaryA");
 
         prank(deployer);
-        mytho = new MYTHO(deployer, deployer, deployer, deployer);
+        mythoImpl = new MYTHO();
+        mythoProxy = new TransparentUpgradeableProxy(
+            address(mythoImpl),
+            deployer,
+            ""
+        );
+        mytho = MYTHO(address(mythoProxy));
+        mytho.initialize(deployer, deployer, deployer, deployer);
         vestingWallet = new VestingWallet(beneficiaryA, 100, 1000);
         deal(address(mytho), address(vestingWallet), 100e18);
     }
