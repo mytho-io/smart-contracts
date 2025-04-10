@@ -16,3 +16,6 @@ interfaces=src/interfaces
 @solmate/=lib/solmate/src/
 
 solidity-bytes-utils/=lib/solidity-bytes-utils/
+
+@chainlink/local/=lib/chainlink-local/
+@ccip/=lib/ccip/contracts/src/v0.8/

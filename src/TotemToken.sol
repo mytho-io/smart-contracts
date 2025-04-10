@@ -24,8 +24,8 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
     event SalePeriodEnded();
 
     // Custom errors
-    error InvalidAddress(); 
-    error NotAllowedInSalePeriod();    
+    error InvalidAddress();
+    error NotAllowedInSalePeriod();
     error OnlyForDistributor();
     error SalePeriodAlreadyEnded();
 
@@ -36,7 +36,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
      * @param _totemDistributor The address of the token distributor
      */
     constructor(
-        string memory _name, 
+        string memory _name,
         string memory _symbol,
         address _totemDistributor
     ) ERC20(_name, _symbol) ERC20Permit(_name) {
@@ -46,7 +46,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
 
         // Mint all tokens at once and assign them to the distributor
         _mint(_totemDistributor, 1_000_000_000 ether);
-        
+
         // Enable sale period
         salePeriod = true;
     }
@@ -94,7 +94,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         if (salePeriod && msg.sender != totemDistributor) {
             revert NotAllowedInSalePeriod();
         }
-        
+
         super._update(_from, _to, _value);
     }
 }

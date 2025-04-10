@@ -5,6 +5,7 @@ pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
@@ -15,44 +16,40 @@ import {Totem} from "./Totem.sol";
 
 /**
  * @title MeritManager
- * @dev Manages merit points for registered totems and distributes MYTHO tokens based on merit.
+ * @notice Manages merit points for registered totems and distributes MYTHO tokens based on merit.
  * Includes features like totem registration, merit crediting, boosting, and claiming rewards.
+ * Contract can be paused in emergency situations.
  */
-contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
-    using SafeERC20 for IERC20;    
+contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+    using SafeERC20 for IERC20;
     using Address for address payable;
 
     // State variables
-    address public mythoToken;
-    address public treasuryAddr;
-    address[4] public vestingWallets;
-    uint256[4] public vestingWalletsAllocation;
+    address private mythoToken;
+    address private treasuryAddr;
+    address[4] private vestingWallets;
+    uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
     uint256 public periodDuration;
-    uint256 public deploymentTimestamp;
+    uint256 public startTime; // Initially set to deployment timestamp, updated when period duration changes
     uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
+    uint256 public lastProcessedPeriod; // Last period that was fully processed
+    uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
+    address[] public registeredTotemsList; // Array to track all registered totems
 
+    // Mappings
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
     mapping(uint256 period => mapping(address totemAddress => uint256 points))
-        public totemMerit; // Total merit points across all totems per period
-    mapping(uint256 period => mapping(address totemAddr => bool claimed)) public isClaimed; // Whether rewards have been claimed for a period by a specific totem
+        public totemMerit; // Merit points for each totem per period
+    mapping(uint256 period => mapping(address totemAddr => bool claimed))
+        public isClaimed; // Whether rewards have been claimed for a period by a specific totem
     mapping(uint256 period => uint256 releasedMytho) public releasedMytho; // Total MYTHO released per period
-
-    // Period tracking
-    uint256 public lastProcessedPeriod; // Last period that was fully processed
-
-    // Array to track all registered totems
-    address[] public registeredTotemsList;
-
-    // Boost tracking
     mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Whether a user has boosted in a period
     mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Which Totem a user boosted in a period
+    mapping(address => bool) public registeredTotems; // Totem state tracking
 
-    // Totem state tracking
-    mapping(address => bool) public registeredTotems;
-
-    // Roles
+    // Constants - Roles
     bytes32 public constant MANAGER = keccak256("MANAGER");
     bytes32 public constant REGISTRATOR = keccak256("REGISTRATOR");
     bytes32 public constant BLACKLISTED = keccak256("BLACKLISTED");
@@ -87,9 +84,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error TransferFailed();
     error InvalidAddress();
     error InsufficientTotemBalance();
+    error InvalidPeriodDuration();
+    error ZeroAmount();
 
     /**
-     * @dev Initializes the contract with required parameters
+     * @notice Initializes the contract with required parameters
      * @param _registryAddr Address of the AddressRegistry contract
      * @param _vestingWallets Array of vesting wallet addresses
      */
@@ -99,6 +98,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     ) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
+        __Pausable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
@@ -108,7 +108,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         vestingWallets = _vestingWallets;
         periodDuration = 30 days;
-        deploymentTimestamp = block.timestamp;
+        startTime = block.timestamp; // Initially set to deployment timestamp
+        accumulatedPeriods = 0;
         vestingWalletsAllocation = [
             175_000_000 ether,
             125_000_000 ether,
@@ -116,16 +117,18 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             50_000_000 ether
         ];
 
-        oneTotemBoost = 10; // 10 merit points per boost
+        oneTotemBoost = 10; // 10 merit points per boost initially
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
         boostFee = 0.001 ether; // 0.001 native tokens for boost fee
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
-     * @dev Registers a new totem
+     * @notice Registers a new totem
      * @param _totemAddr Address of the totem to register
      */
-    function register(address _totemAddr) external {
+    function register(address _totemAddr) external whenNotPaused {
         if (!hasRole(REGISTRATOR, msg.sender)) revert AccessControl();
         if (registeredTotems[_totemAddr]) revert TotemAlreadyRegistered();
         if (_totemAddr == address(0)) revert InvalidAddress();
@@ -137,44 +140,19 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Credits merit points to a registered totem
-     * @param _totemAddr Address of the totem to credit
-     * @param _amount Amount of merit points to credit
-     */
-    function creditMerit(
-        address _totemAddr,
-        uint256 _amount
-    ) external onlyRole(MANAGER) {
-        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
-
-        uint256 currentPeriod_ = currentPeriod();
-
-        // Apply Mythum multiplier if in Mythum period
-        if (isMythum()) {
-            _amount = (_amount * mythumMultiplier) / 100;
-        }
-
-        // Add merit to the totem
-        totemMerit[currentPeriod_][_totemAddr] += _amount;
-        totalMeritPoints[currentPeriod_] += _amount;
-
-        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
-    }
-
-    /**
-     * @dev Allows a user to boost a totem by paying a fee
+     * @notice Allows a user to boost a totem by paying a fee
      * @param _totemAddr Address of the totem to boost
      */
-    function boostTotem(address _totemAddr) external payable nonReentrant {
+    function boostTotem(address _totemAddr) external payable nonReentrant whenNotPaused {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
         if (!isMythum()) revert NotInMythumPeriod();
 
         // Get the totem token address and check if the user has it
-        (address totemTokenAddr,,) = Totem(_totemAddr).getTokenAddresses();
-        if (IERC20(totemTokenAddr).balanceOf(msg.sender) == 0) revert InsufficientTotemBalance();
+        (address totemTokenAddr, , ) = Totem(_totemAddr).getTokenAddresses();
+        if (IERC20(totemTokenAddr).balanceOf(msg.sender) == 0)
+            revert InsufficientTotemBalance();
 
         uint256 currentPeriod_ = currentPeriod();
 
@@ -206,10 +184,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Allows a totem to claim MYTHO tokens for a specific period
+     * @notice Allows a totem to claim MYTHO tokens for a specific period
      * @param _periodNum Period number to claim for
      */
-    function claimMytho(uint256 _periodNum) external nonReentrant {
+    function claimMytho(uint256 _periodNum) external nonReentrant whenNotPaused {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
@@ -237,11 +215,164 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         emit MythoClaimed(totemAddr, totemShare, _periodNum);
     }
 
+    // ADMIN FUNCTIONS
+
     /**
-     * @dev Updates the state of the contract by processing pending periods
+     * @notice Manually triggers state update
+     */
+    function updateState() external onlyRole(MANAGER) {
+        _updateState();
+    }
+
+    /**
+     * @notice Credits merit points to a registered totem
+     * @param _totemAddr Address of the totem to credit
+     * @param _amount Amount of merit points to credit
+     */
+    function creditMerit(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (_amount == 0) revert ZeroAmount();
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+
+        uint256 currentPeriod_ = currentPeriod();
+
+        // Apply Mythum multiplier if in Mythum period
+        if (isMythum()) {
+            _amount = (_amount * mythumMultiplier) / 100;
+        }
+
+        // Add merit to the totem
+        totemMerit[currentPeriod_][_totemAddr] += _amount;
+        totalMeritPoints[currentPeriod_] += _amount;
+
+        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
+    }
+
+    /**
+     * @notice Sets the blacklist status for a totem
+     * @param _totem Address of the totem
+     * @param _blacklisted Whether to blacklist or unblacklist the totem
+     */
+    function setTotemBlacklisted(
+        address _totem,
+        bool _blacklisted
+    ) external onlyRole(MANAGER) {
+        if (!registeredTotems[_totem]) revert TotemNotRegistered();
+        if (hasRole(BLACKLISTED, _totem) && _blacklisted)
+            revert AlreadyBlacklisted(_totem);
+        if (!hasRole(BLACKLISTED, _totem) && !_blacklisted)
+            revert AlreadyNotInBlacklist(_totem);
+
+        if (_blacklisted) {
+            grantRole(BLACKLISTED, _totem);
+        } else {
+            revokeRole(BLACKLISTED, _totem);
+        }
+
+        emit TotemBlacklisted(_totem, _blacklisted);
+    }
+
+    /**
+     * @notice Sets the one Totem boost amount
+     * @param _oneTotemBoost New boost amount
+     */
+    function setOneTotemBoost(
+        uint256 _oneTotemBoost
+    ) external onlyRole(MANAGER) {
+        if (_oneTotemBoost == 0) revert ZeroAmount();
+        oneTotemBoost = _oneTotemBoost;
+        emit ParameterUpdated("oneTotemBoost", _oneTotemBoost);
+    }
+
+    /**
+     * @notice Sets the Mythum multiplier (in percentage, e.g., 150 = 1.5x)
+     * @param _mythumMultiplier New multiplier value
+     */
+    function setMythumMultiplier(
+        uint256 _mythumMultiplier
+    ) external onlyRole(MANAGER) {
+        if (_mythumMultiplier == 0) revert ZeroAmount();
+        mythumMultiplier = _mythumMultiplier;
+        emit ParameterUpdated("mythumMultiplier", _mythumMultiplier);
+    }
+
+    /**
+     * @notice Sets the boost fee in native tokens
+     * @param _boostFee New boost fee
+     */
+    function setBoostFee(uint256 _boostFee) external onlyRole(MANAGER) {
+        boostFee = _boostFee;
+        emit ParameterUpdated("boostFee", _boostFee);
+    }
+
+    /**
+     * @notice Sets the period duration
+     * @param _newPeriodDuration New period duration in seconds
+     */
+    function setPeriodDuration(
+        uint256 _newPeriodDuration
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_newPeriodDuration == 0) revert InvalidPeriodDuration();
+        _updateState();
+        
+        // Store the current period count before changing the duration
+        accumulatedPeriods = currentPeriod();
+        startTime = block.timestamp; // Reset the start time to now
+        
+        periodDuration = _newPeriodDuration;
+        lastProcessedPeriod = currentPeriod();
+        emit ParameterUpdated("periodDuration", _newPeriodDuration);
+    }
+
+    /**
+     * @notice Grants the registrator role to an address
+     * @param _registrator Address to grant the role to
+     * @notice This role is given to TotemFactory and TotemTokenDistributor contracts
+     */
+    function grantRegistratorRole(
+        address _registrator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_registrator == address(0)) revert InvalidAddress();
+        grantRole(REGISTRATOR, _registrator);
+    }
+
+    /**
+     * @notice Revokes the registrator role from an address
+     * @param _registrator Address to revoke the role from
+     */
+    function revokeRegistratorRole(
+        address _registrator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_registrator == address(0)) revert InvalidAddress();
+        revokeRole(REGISTRATOR, _registrator);
+    }
+
+    /**
+     * @notice Pauses the contract
+     * @dev Only callable by MANAGER role
+     */
+    function pause() external onlyRole(MANAGER) {
+        _pause();
+    }
+
+    /**
+     * @notice Unpauses the contract
+     * @dev Only callable by MANAGER role
+     */
+    function unpause() external onlyRole(MANAGER) {
+        _unpause();
+    }
+
+    // INTERNAL FUNCTIONS
+
+    /**
+     * @notice Updates the state of the contract by processing pending periods
      */
     function _updateState() private {
-        uint256 yearIdx = _yearIndex();
+        uint256 yearIdx = getYearIndex();
 
         // Check if we're still within the valid year range
         if (yearIdx >= 4) {
@@ -254,60 +385,58 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         // Only process completed periods, not the current period
         if (_currentPeriod > lastProcessedPeriod) {
+            uint256 slices = (30 days * 12) / periodDuration;
             // Process all completed periods up to but not including the current period
             for (
                 uint256 period = lastProcessedPeriod;
                 period < _currentPeriod;
                 period++
             ) {
-                releasedMytho[period] = vestingWalletsAllocation[yearIdx] / 12;
+                releasedMytho[period] =
+                    vestingWalletsAllocation[yearIdx] /
+                    slices;
                 emit MythoReleased(releasedMytho[period], period);
             }
 
             wallet.release(address(mythoToken));
-            lastProcessedPeriod = _currentPeriod; // Set the last processed period to the previous period
+            lastProcessedPeriod = _currentPeriod;
         }
-    }
-
-    /**
-     * @dev Manually triggers state update
-     */
-    function updateState() external onlyRole(MANAGER) {
-        _updateState();
     }
 
     // VIEW FUNCTIONS
 
     /**
-     * @dev Returns the current period number
+     * @notice Returns the current period number
      * @return Current period number
      */
     function currentPeriod() public view returns (uint256) {
-        if (block.timestamp < deploymentTimestamp) return 0;
-        return (block.timestamp - deploymentTimestamp) / periodDuration;
+        if (block.timestamp < startTime) return accumulatedPeriods;
+        return accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
     }
 
     /**
-     * @dev Checks if the current time is within the Mythum period
+     * @notice Checks if the current time is within the Mythum period
      * @return Whether current time is in Mythum period
      */
     function isMythum() public view returns (bool) {
-        uint256 currentPeriodStart = deploymentTimestamp +
-            (currentPeriod() * periodDuration);
+        uint256 currentPeriodNumber = currentPeriod();
+        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
+        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
         return block.timestamp >= mythumStart;
     }
 
     /**
-     * @dev Returns the year index based on the current period
+     * @notice Returns the year index based on the current period
      * @return Year index (0-3)
      */
-    function _yearIndex() private view returns (uint256) {
-        return (currentPeriod() / 12) > 3 ? 3 : (currentPeriod() / 12);
+    function getYearIndex() public view returns (uint256) {
+        uint256 slices = (30 days * 12) / periodDuration;
+        return (currentPeriod() / slices) > 3 ? 3 : (currentPeriod() / slices);
     }
 
     /**
-     * @dev Gets the total number of registered totems
+     * @notice Gets the total number of registered totems
      * @return Total number of registered totems
      */
     function getRegisteredTotemsCount() external view returns (uint256) {
@@ -315,7 +444,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets all registered totems
+     * @notice Gets all registered totems
      * @return Array of registered totem addresses
      */
     function getAllRegisteredTotems() external view returns (address[] memory) {
@@ -323,7 +452,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets the pending MYTHO reward for a totem in a specific period
+     * @notice Gets the pending MYTHO reward for a totem in a specific period
      * @param _totemAddr Address of the totem
      * @param _periodNum Period number to check
      * @return Pending MYTHO reward amount
@@ -350,44 +479,54 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets the period time bounds
+     * @notice Gets the period time bounds
      * @param _periodNum Period number to check
-     * @return startTime Period start timestamp
+     * @return periodStartTime Period start timestamp
      * @return endTime Period end timestamp
      */
     function getPeriodTimeBounds(
         uint256 _periodNum
-    ) external view returns (uint256 startTime, uint256 endTime) {
-        startTime = deploymentTimestamp + (_periodNum * periodDuration);
-        endTime = startTime + periodDuration;
-        return (startTime, endTime);
+    ) external view returns (uint256 periodStartTime, uint256 endTime) {
+        // For periods before the accumulated periods, we can't accurately determine bounds
+        // since the period duration might have changed
+        if (_periodNum < accumulatedPeriods) {
+            return (0, 0); // Indicate that we can't determine bounds for historical periods
+        }
+        
+        uint256 periodsAfterAccumulation = _periodNum - accumulatedPeriods;
+        periodStartTime = startTime + (periodsAfterAccumulation * periodDuration);
+        endTime = periodStartTime + periodDuration;
+        return (periodStartTime, endTime);
     }
 
     /**
-     * @dev Gets the time remaining until the next period
+     * @notice Gets the time remaining until the next period
      * @return Time in seconds until the next period
      */
     function getTimeUntilNextPeriod() external view returns (uint256) {
-        uint256 currentPeriodEnd = deploymentTimestamp +
-            ((currentPeriod() + 1) * periodDuration);
-        if (block.timestamp >= currentPeriodEnd) {
+        uint256 currentPeriodNumber = currentPeriod();
+        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
+        uint256 nextPeriodStart = startTime + ((periodsAfterAccumulation + 1) * periodDuration);
+        
+        if (block.timestamp >= nextPeriodStart) {
             return 0;
         }
-        return currentPeriodEnd - block.timestamp;
+        return nextPeriodStart - block.timestamp;
     }
 
     /**
-     * @dev Gets the timestamp when the current Mythum period starts
+     * @notice Gets the timestamp when the current Mythum period starts
      * @return Timestamp of the current Mythum period start
      */
     function getCurrentMythumStart() external view returns (uint256) {
-        uint256 currentPeriodStart = deploymentTimestamp +
-            (currentPeriod() * periodDuration);
+        uint256 currentPeriodNumber = currentPeriod();
+        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
+        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
         return currentPeriodStart + ((periodDuration * 3) / 4);
     }
 
     /**
-     * @dev Checks if a totem has been registered
+     * @notice Checks if a totem has been registered
      * @param _totemAddr Address to check
      * @return Whether the address is a registered totem
      */
@@ -398,7 +537,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Checks if a totem is blacklisted
+     * @notice Checks if a totem is blacklisted
      * @param _totemAddr Address to check
      * @return Whether the totem is blacklisted
      */
@@ -407,7 +546,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets the total merit points for a totem in a specific period
+     * @notice Gets the total merit points for a totem in a specific period
      * @param _totemAddr Address of the totem
      * @param _periodNum Period number to check
      * @return Merit points for the totem in the specified period
@@ -420,7 +559,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets whether a user has boosted in a specific period
+     * @notice Gets whether a user has boosted in a specific period
      * @param _user User address to check
      * @param _periodNum Period number to check
      * @return Whether the user has boosted in the specified period
@@ -433,7 +572,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @dev Gets which totem a user boosted in a specific period
+     * @notice Gets which totem a user boosted in a specific period
      * @param _user User address to check
      * @param _periodNum Period number to check
      * @return Address of the totem the user boosted
@@ -443,136 +582,6 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _periodNum
     ) external view returns (address) {
         return userBoostedTotem[_periodNum][_user];
-    }
-
-    // ADMIN FUNCTIONS
-
-    /**
-     * @dev Sets the one Totem boost amount
-     * @param _oneTotemBoost New boost amount
-     */
-    function setOneTotemBoost(
-        uint256 _oneTotemBoost
-    ) external onlyRole(MANAGER) {
-        oneTotemBoost = _oneTotemBoost;
-        emit ParameterUpdated("oneTotemBoost", _oneTotemBoost);
-    }
-
-    /**
-     * @dev Sets the Mythum multiplier (in percentage, e.g., 150 = 1.5x)
-     * @param _mythumMultiplier New multiplier value
-     */
-    function setMythmsMultiplier(
-        uint256 _mythumMultiplier
-    ) external onlyRole(MANAGER) {
-        mythumMultiplier = _mythumMultiplier;
-        emit ParameterUpdated("mythumMultiplier", _mythumMultiplier);
-    }
-
-    /**
-     * @dev Sets the boost fee in native tokens
-     * @param _boostFee New boost fee
-     */
-    function setBoostFee(uint256 _boostFee) external onlyRole(MANAGER) {
-        boostFee = _boostFee;
-        emit ParameterUpdated("boostFee", _boostFee);
-    }
-
-    /**
-     * @dev Sets the blacklist status for a totem
-     * @param _totem Address of the totem
-     * @param _blacklisted Whether to blacklist or unblacklist the totem
-     */
-    function setTotemBlacklisted(
-        address _totem,
-        bool _blacklisted
-    ) external onlyRole(MANAGER) {
-        if (!registeredTotems[_totem]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totem) && _blacklisted)
-            revert AlreadyBlacklisted(_totem);
-        if (!hasRole(BLACKLISTED, _totem) && !_blacklisted)
-            revert AlreadyNotInBlacklist(_totem);
-
-        if (_blacklisted) {
-            grantRole(BLACKLISTED, _totem);
-        } else {
-            revokeRole(BLACKLISTED, _totem);
-        }
-
-        emit TotemBlacklisted(_totem, _blacklisted);
-    }
-
-    /**
-     * @dev Sets the period duration
-     * @param _periodDuration New period duration in seconds
-     */
-    function setPeriodDuration(
-        uint256 _periodDuration
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        periodDuration = _periodDuration;
-        emit ParameterUpdated("periodDuration", _periodDuration);
-    }
-
-    /**
-     * @dev Grants the registrator role to an address
-     * @param _registrator Address to grant the role to
-     */
-    function grantRegistratorRole(
-        address _registrator
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        grantRole(REGISTRATOR, _registrator);
-    }
-
-    /**
-     * @dev Revokes the registrator role from an address
-     * @param _registrator Address to revoke the role from
-     */
-    function revokeRegistratorRole(
-        address _registrator
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        revokeRole(REGISTRATOR, _registrator);
-    }
-
-    /**
-     * @dev Updates a vesting wallet address
-     * @param _index Index of the wallet to update (0-3)
-     * @param _newWallet New wallet address
-     */
-    function setVestingWallet(
-        uint256 _index,
-        address _newWallet
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_index >= 4) revert InvalidPeriod();
-        if (_newWallet == address(0)) revert InvalidAddress();
-
-        vestingWallets[_index] = _newWallet;
-    }
-
-    /**
-     * @dev Updates a vesting wallet allocation
-     * @param _index Index of the allocation to update (0-3)
-     * @param _newAllocation New allocation amount
-     */
-    function setVestingWalletAllocation(
-        uint256 _index,
-        uint256 _newAllocation
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_index >= 4) revert InvalidPeriod();
-
-        vestingWalletsAllocation[_index] = _newAllocation;
-    }
-
-    /**
-     * @dev Force update of released MYTHO for a specific period
-     * @param _periodNum Period number to update
-     * @param _amount Amount of MYTHO released
-     */
-    function forceUpdateReleasedMytho(
-        uint256 _periodNum,
-        uint256 _amount
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        releasedMytho[_periodNum] = _amount;
-        emit MythoReleased(_amount, _periodNum);
     }
 }
 
@@ -591,26 +600,30 @@ import {TotemToken} from "./TotemToken.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 
+/**
+ * @title TotemFactory
+ * @notice Factory contract for creating new Totems in the MYTHO ecosystem
+ *      Handles creation of new Totems with either new or existing tokens
+ */
 contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
-    // Totem token distributor instance
+    // State variables - Contracts
     TotemTokenDistributor private totemDistributor;
 
-    // Core contract addresses
+    // State variables - Addresses
     address private beaconAddr;
     address private treasuryAddr;
     address private meritManagerAddr;
     address private registryAddr;
-
-    // ASTR token address
     address private feeTokenAddr;
 
-    // Fee settings
+    // State variables - Fee settings
     uint256 private creationFee;
-
     uint256 private lastId;
 
+    // Mappings
     mapping(uint256 totemId => TotemData data) private totemData;
 
+    // Structs
     struct TotemData {
         address creator;
         address totemTokenAddr;
@@ -619,9 +632,11 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         bool isCustomToken;
     }
 
+    // Constants - Roles
     bytes32 private constant MANAGER = keccak256("MANAGER");
     bytes32 private constant WHITELISTED = keccak256("WHITELISTED");
 
+    // Events
     event TotemCreated(
         address totemAddr,
         address totemTokenAddr,
@@ -636,6 +651,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     event FeeTokenUpdated(address oldToken, address newToken);
     event BatchWhitelistUpdated(address[] tokens, bool isAdded);
 
+    // Custom errors
     error AlreadyWhitelisted(address totemTokenAddr);
     error NotWhitelisted(address totemTokenAddr);
     error InsufficientFee(uint256 provided, uint256 required);
@@ -643,7 +659,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     error ZeroAddress();
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
+    error ZeroAmount();
 
+    /**
+     * @notice Initializes the TotemFactory contract
+     *      Sets up initial roles and configuration
+     * @param _registryAddr Address of the AddressRegistry contract
+     * @param _beaconAddr Address of the beacon for Totem proxies
+     * @param _feeTokenAddr Address of the token used for creation fees
+     */
     function initialize(
         address _registryAddr,
         address _beaconAddr,
@@ -666,31 +690,18 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         registryAddr = _registryAddr;
 
         feeTokenAddr = _feeTokenAddr;
-        creationFee = 1 ether;
+        creationFee = 1 ether; // Initial fee
     }
 
-    /**
-     * @dev Collects creation fee from the sender
-     * @param _sender The address paying the fee
-     */
-    function _collectFee(address _sender) internal {
-        // Skip fee collection if fee is set to zero
-        if (creationFee == 0) return;
-
-        // Transfer tokens from sender to fee collector
-        bool success = IERC20(feeTokenAddr).transferFrom(
-            _sender,
-            treasuryAddr,
-            creationFee
-        );
-        if (!success) revert FeeTransferFailed();
-    }
+    // EXTERNAL FUNCTIONS
 
     /**
-     * @dev Creates a new totem with a new token
+     * @notice Creates a new totem with a new token
+     *      Deploys a new TotemToken and Totem proxy
      * @param _dataHash The hash of the totem data
      * @param _tokenName The name of the token
      * @param _tokenSymbol The symbol of the token
+     * @param _collaborators Array of collaborator addresses
      */
     function createTotem(
         bytes memory _dataHash,
@@ -743,9 +754,11 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Creates a new totem with an existing whitelisted token
+     * @notice Creates a new totem with an existing whitelisted token
+     *      Uses an existing token instead of deploying a new one
      * @param _dataHash The hash of the totem data
      * @param _tokenAddr The address of the existing token
+     * @param _collaborators Array of collaborator addresses
      */
     function createTotemWithExistingToken(
         bytes memory _dataHash,
@@ -792,10 +805,10 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         );
     }
 
-    /// ADMIN LOGIC
+    // ADMIN FUNCTIONS
 
     /**
-     * @dev Updates the creation fee
+     * @notice Updates the creation fee
      * @param _newFee The new fee amount
      */
     function setCreationFee(uint256 _newFee) public onlyRole(MANAGER) {
@@ -805,7 +818,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Updates the fee token address
+     * @notice Updates the fee token address
      * @param _newFeeToken The address of the new fee token
      */
     function setFeeToken(address _newFeeToken) public onlyRole(MANAGER) {
@@ -817,7 +830,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Adds multiple tokens to the whitelist
+     * @notice Adds multiple tokens to the whitelist
      * @param _tokens Array of token addresses to whitelist
      */
     function batchAddToWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
@@ -831,7 +844,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Removes multiple tokens from the whitelist
+     * @notice Removes multiple tokens from the whitelist
      * @param _tokens Array of token addresses to remove from whitelist
      */
     function batchRemoveFromWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
@@ -845,7 +858,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Adds a single token to the whitelist
+     * @notice Adds a single token to the whitelist
      * @param _token The token address to whitelist
      */
     function addTokenToWhitelist(address _token) public onlyRole(MANAGER) {
@@ -858,7 +871,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Removes a single token from the whitelist
+     * @notice Removes a single token from the whitelist
      * @param _token The token address to remove from whitelist
      */
     function removeTokenFromWhitelist(address _token) public onlyRole(MANAGER) {
@@ -870,18 +883,43 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         emit BatchWhitelistUpdated(tokens, false);
     }
 
+    /**
+     * @notice Pauses the contract
+     */
     function pause() public onlyRole(MANAGER) {
         _pause();
     }
 
+    /**
+     * @notice Unpauses the contract
+     */
     function unpause() public onlyRole(MANAGER) {
         _unpause();
     }
 
-    /// READERS
+    // INTERNAL FUNCTIONS
 
     /**
-     * @dev Gets the current creation fee
+     * @notice Collects creation fee from the sender
+     * @param _sender The address paying the fee
+     */
+    function _collectFee(address _sender) internal {
+        // Skip fee collection if fee is set to zero
+        if (creationFee == 0) return;
+
+        // Transfer tokens from sender to fee collector
+        bool success = IERC20(feeTokenAddr).transferFrom(
+            _sender,
+            treasuryAddr,
+            creationFee
+        );
+        if (!success) revert FeeTransferFailed();
+    }
+
+    // VIEW FUNCTIONS
+
+    /**
+     * @notice Gets the current creation fee
      * @return The current fee amount in fee tokens
      */
     function getCreationFee() external view returns (uint256) {
@@ -889,7 +927,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the current fee token address
+     * @notice Gets the current fee token address
      * @return The address of the current fee token
      */
     function getFeeToken() external view returns (address) {
@@ -897,7 +935,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets the last assigned totem ID
+     * @notice Gets the last assigned totem ID
      * @return The last totem ID
      */
     function getLastId() external view returns (uint256) {
@@ -905,7 +943,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @dev Gets data for a specific totem
+     * @notice Gets data for a specific totem
      * @param _totemId The ID of the totem
      * @return The totem data structure
      */
@@ -923,7 +961,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -939,58 +977,48 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title TotemTokenDistributor
- * @dev This contract manages the distribution of Totem tokens during and after sales periods.
- * It handles:
- * - Registration of new totems from the TotemFactory
- * - Buying and selling totems during the sales period
- * - Distribution of collected payment tokens after the sales period ends
- * - Adding liquidity to AMM pools
- * - Burning totem tokens
+ * @notice This contract manages the distribution of Totem tokens during and after sales periods
+ *      Handles registration of new totems, token sales, distribution of collected payment tokens,
+ *      adding liquidity to AMM pools, and burning totem tokens
  */
 
-contract TotemTokenDistributor is AccessControlUpgradeable {
-    using EnumerableSet for EnumerableSet.AddressSet;
+contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
 
+    // State variables - Contracts
     TotemFactory private factory;
     MeritManager private meritManager;
     IERC20 private mytho;
 
-    uint256 public maxTokensPerAddress;
+    // State variables - Configuration
     uint256 private oneTotemPriceInUsd;
+    uint256 public maxTokensPerAddress;
 
-    // Maximum age of price feed data before it's considered stale (1 hour)
-    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours;
-
-    // contract address for revenue in payment tokens
-    address private treasuryAddr;
-
-    // address of payment token
-    address private paymentTokenAddr;
-
-    // Uniswap V2 router address
-    address private uniswapV2RouterAddr;
-
-    // Mapping from token address to Chainlink price feed address
-    mapping(address => address) private priceFeedAddresses;
-
-    /// @dev General info about totems
-    mapping(address totemTokenAddr => TotemData TotemData) private totems;
-
-    /// @dev Number of sale positions are eq to the used paymentTokens by address
-    mapping(address userAddress => mapping(address totemTokenAddr => SalePosInToken))
-        private salePositions;
-
-    bytes32 private constant MANAGER = keccak256("MANAGER");
-
-    // Default percentage shares for distribution - can be made configurable
+    // State variables - Distribution shares
     uint256 public revenuePaymentTokenShare;
     uint256 public totemCreatorPaymentTokenShare;
     uint256 public poolPaymentTokenShare;
     uint256 public vaultPaymentTokenShare;
+
+    // State variables - Addresses
+    address private treasuryAddr; // contract address for revenue in payment tokens
+    address private paymentTokenAddr; // address of payment token
+    address private uniswapV2RouterAddr; // Uniswap V2 router address
+
+    // State variables - Mappings
+    mapping(address => address) private priceFeedAddresses; // Mapping from token address to Chainlink price feed address
+    mapping(address totemTokenAddr => TotemData TotemData) private totems; // General info about totems
+    mapping(address userAddress => mapping(address totemTokenAddr => SalePosInToken))
+        private salePositions;
+
+    // Constants
     uint256 private constant PRECISION = 10000;
     uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
+    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours; // Maximum age of price feed data before it's considered stale (1 hour)
 
+    bytes32 private constant MANAGER = keccak256("MANAGER");
+
+    // Structs
     struct TotemData {
         address totemAddr;
         address creator;
@@ -1063,8 +1091,14 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
     error LiquidityAdditionFailed();
     error UniswapRouterNotSet();
 
+    /**
+     * @notice Initializes the TotemTokenDistributor contract
+     *      Sets up initial roles and configuration
+     * @param _registryAddr Address of the AddressRegistry contract
+     */
     function initialize(address _registryAddr) public initializer {
         __AccessControl_init();
+        __Pausable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
@@ -1086,8 +1120,13 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         vaultPaymentTokenShare = 6843; // 68.43%
     }
 
-    /// @notice Being called by TotemFactory during totem creation
-    function register() external {
+    // EXTERNAL FUNCTIONS
+
+    /**
+     * @notice Being called by TotemFactory during totem creation
+     *      Registers a new totem and distributes initial tokens
+     */
+    function register() external whenNotPaused {
         if (address(factory) == address(0)) revert AlreadySet();
         if (msg.sender != address(factory)) revert OnlyFactory();
 
@@ -1121,8 +1160,12 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
     }
 
-    /// @notice Buy totems for allowed payment tokens
-    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+    /**
+     * @notice Buy totems for allowed payment tokens
+     * @param _totemTokenAddr Address of the totem token to buy
+     * @param _totemTokenAmount Amount of totem tokens to buy
+     */
+    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -1183,8 +1226,12 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         }
     }
 
-    /// @notice Sell totems for used payment token in sale period
-    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external {
+    /**
+     * @notice Sell totems for used payment token in sale period
+     * @param _totemTokenAddr Address of the totem token to sell
+     * @param _totemTokenAmount Amount of totem tokens to sell
+     */
+    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -1230,137 +1277,28 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
     }
 
-    /// INTERNAL LOGIC
+    // ADMIN FUNCTIONS
 
-    function _closeSalePeriod(address _totemTokenAddr) internal {
-        // close sale period and open burn functionality for totem token
-        totems[_totemTokenAddr].isSalePeriod = false;
-
-        // open transfers for totem token
-        TotemToken(_totemTokenAddr).openTransfers();
-
-        // register totem in MeritManager and activate merit distribution for it
-        meritManager.register(totems[_totemTokenAddr].totemAddr);
-
-        // distribute collected payment tokens
-        uint256 paymentTokenAmount = totems[_totemTokenAddr]
-            .collectedPaymentTokens;
-        address _paymentTokenAddr = totems[_totemTokenAddr].paymentToken;
-
-        // calculate revenue share
-        uint256 revenueShare = (paymentTokenAmount * revenuePaymentTokenShare) /
-            PRECISION;
-        IERC20(_paymentTokenAddr).safeTransfer(treasuryAddr, revenueShare);
-
-        // calculate totem creator share
-        uint256 creatorShare = (paymentTokenAmount *
-            totemCreatorPaymentTokenShare) / PRECISION;
-        IERC20(_paymentTokenAddr).safeTransfer(
-            totems[_totemTokenAddr].creator,
-            creatorShare
-        );
-
-        // calculate totem vault share
-        uint256 vaultShare = (paymentTokenAmount * vaultPaymentTokenShare) /
-            PRECISION;
-        IERC20(_paymentTokenAddr).safeTransfer(
-            totems[_totemTokenAddr].totemAddr,
-            vaultShare
-        );
-
-        // calculate totem pool share
-        uint256 poolShare = (paymentTokenAmount * poolPaymentTokenShare) /
-            PRECISION;
-
-        // send liquidity to AMM and relay LP tokens to Totem
-        (uint256 liquidity, address liquidityToken) = _addLiquidity(
-            _totemTokenAddr,
-            _paymentTokenAddr,
-            POOL_INITIAL_SUPPLY,
-            poolShare
-        );
-
-        // set payment token for Totem and close sale period
-        Totem(totems[_totemTokenAddr].totemAddr).closeSalePeriod(
-            IERC20(_paymentTokenAddr),
-            IERC20(liquidityToken)
-        );
-
-        IERC20(liquidityToken).safeTransfer(
-            totems[_totemTokenAddr].totemAddr,
-            liquidity
-        );
-
-        emit SalePeriodClosed(_totemTokenAddr, paymentTokenAmount);
+    /**
+     * @notice Pauses the contract
+     * @dev Only callable by accounts with the MANAGER role
+     */
+    function pause() external onlyRole(MANAGER) {
+        _pause();
     }
 
     /**
-     * @notice Adds liquidity to a Uniswap V2 pool
-     * @dev Approves tokens for the router and adds liquidity to the pool
-     * @param _totemTokenAddr Address of the totem token
-     * @param _paymentTokenAddr Address of the payment token
-     * @param _totemTokenAmount Amount of totem tokens to add to the pool
-     * @param _paymentTokenAmount Amount of payment tokens to add to the pool
-     * @return liquidity Amount of liquidity tokens received
-     * @return liquidityToken Address of the liquidity token (pair)
+     * @notice Unpauses the contract
+     * @dev Only callable by accounts with the MANAGER role
      */
-    function _addLiquidity(
-        address _totemTokenAddr,
-        address _paymentTokenAddr,
-        uint256 _totemTokenAmount,
-        uint256 _paymentTokenAmount
-    ) internal returns (uint256 liquidity, address liquidityToken) {
-        if (uniswapV2RouterAddr == address(0)) revert UniswapRouterNotSet();
-
-        IUniswapV2Router02 router = IUniswapV2Router02(uniswapV2RouterAddr);
-
-        // Get the factory address
-        address factoryAddr = router.factory();
-        IUniswapV2Factory factory_ = IUniswapV2Factory(factoryAddr);
-
-        // Get or create the pair
-        liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
-        if (liquidityToken == address(0)) {
-            liquidityToken = factory_.createPair(
-                _totemTokenAddr,
-                _paymentTokenAddr
-            );
-        }
-
-        // Approve tokens for the uni router
-        IERC20(_totemTokenAddr).approve(uniswapV2RouterAddr, _totemTokenAmount);
-        IERC20(_paymentTokenAddr).approve(
-            uniswapV2RouterAddr,
-            _paymentTokenAmount
-        );
-
-        // Add liquidity
-        (, , liquidity) = router.addLiquidity(
-            _totemTokenAddr,
-            _paymentTokenAddr,
-            _totemTokenAmount,
-            _paymentTokenAmount,
-            (_totemTokenAmount * 995) / 1000, // 0.5% slippage
-            (_paymentTokenAmount * 995) / 1000, // 0.5% slippage
-            address(this),
-            block.timestamp + 600 // Deadline: 10 minutes from now
-        );
-
-        if (liquidity == 0) revert LiquidityAdditionFailed();
-
-        emit LiquidityAdded(
-            _totemTokenAddr,
-            _paymentTokenAddr,
-            _totemTokenAmount,
-            _paymentTokenAmount,
-            liquidity
-        );
-
-        return (liquidity, liquidityToken);
+    function unpause() external onlyRole(MANAGER) {
+        _unpause();
     }
 
-    /// ADMIN LOGIC
-
+    /**
+     * @notice Sets the payment token address
+     * @param _paymentTokenAddr Address of the payment token
+     */
     function setPaymentToken(
         address _paymentTokenAddr
     ) external onlyRole(MANAGER) {
@@ -1368,6 +1306,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         paymentTokenAddr = _paymentTokenAddr;
     }
 
+    /**
+     * @notice Sets the TotemFactory address from registry
+     * @param _registryAddr Address of the AddressRegistry contract
+     */
     function setTotemFactory(address _registryAddr) external onlyRole(MANAGER) {
         if (address(factory) != address(0)) revert AlreadySet();
         if (_registryAddr == address(0)) revert ZeroAddress();
@@ -1376,6 +1318,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         );
     }
 
+    /**
+     * @notice Sets the maximum number of totem tokens per address
+     * @param _amount Maximum amount of tokens
+     */
     function setMaxTotemTokensPerAddress(
         uint256 _amount
     ) external onlyRole(MANAGER) {
@@ -1451,7 +1397,149 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
         oneTotemPriceInUsd = _priceInUsd;
     }
 
-    /// READERS
+    /// INTERNAL FUNCTIONS
+
+    /**
+     * @notice Closes the sale period for a totem token
+     *      Distributes collected payment tokens and adds liquidity to AMM
+     * @param _totemTokenAddr Address of the totem token
+     */
+    function _closeSalePeriod(address _totemTokenAddr) internal {
+        // close sale period and open burn functionality for totem token
+        totems[_totemTokenAddr].isSalePeriod = false;
+
+        // open transfers for totem token
+        TotemToken(_totemTokenAddr).openTransfers();
+
+        // register totem in MeritManager and activate merit distribution for it
+        meritManager.register(totems[_totemTokenAddr].totemAddr);
+
+        // distribute collected payment tokens
+        uint256 paymentTokenAmount = totems[_totemTokenAddr]
+            .collectedPaymentTokens;
+        address _paymentTokenAddr = totems[_totemTokenAddr].paymentToken;
+
+        // calculate revenue share
+        uint256 revenueShare = (paymentTokenAmount * revenuePaymentTokenShare) /
+            PRECISION;
+        IERC20(_paymentTokenAddr).safeTransfer(treasuryAddr, revenueShare);
+
+        // calculate totem creator share
+        uint256 creatorShare = (paymentTokenAmount *
+            totemCreatorPaymentTokenShare) / PRECISION;
+        IERC20(_paymentTokenAddr).safeTransfer(
+            totems[_totemTokenAddr].creator,
+            creatorShare
+        );
+
+        // calculate totem vault share
+        uint256 vaultShare = (paymentTokenAmount * vaultPaymentTokenShare) /
+            PRECISION;
+        IERC20(_paymentTokenAddr).safeTransfer(
+            totems[_totemTokenAddr].totemAddr,
+            vaultShare
+        );
+
+        // calculate totem pool share
+        uint256 poolShare = (paymentTokenAmount * poolPaymentTokenShare) /
+            PRECISION;
+
+        // send liquidity to AMM and relay LP tokens to Totem
+        (uint256 liquidity, address liquidityToken) = _addLiquidity(
+            _totemTokenAddr,
+            _paymentTokenAddr,
+            POOL_INITIAL_SUPPLY,
+            poolShare
+        );
+
+        // set payment token for Totem and close sale period
+        Totem(totems[_totemTokenAddr].totemAddr).closeSalePeriod(
+            IERC20(_paymentTokenAddr),
+            IERC20(liquidityToken)
+        );
+
+        IERC20(liquidityToken).safeTransfer(
+            totems[_totemTokenAddr].totemAddr,
+            liquidity
+        );
+
+        emit SalePeriodClosed(_totemTokenAddr, paymentTokenAmount);
+    }
+
+    /**
+     * @notice Adds liquidity to a Uniswap V2 pool
+     *      Approves tokens for the router and adds liquidity to the pool
+     * @param _totemTokenAddr Address of the totem token
+     * @param _paymentTokenAddr Address of the payment token
+     * @param _totemTokenAmount Amount of totem tokens to add to the pool
+     * @param _paymentTokenAmount Amount of payment tokens to add to the pool
+     * @return liquidity Amount of liquidity tokens received
+     * @return liquidityToken Address of the liquidity token (pair)
+     */
+    function _addLiquidity(
+        address _totemTokenAddr,
+        address _paymentTokenAddr,
+        uint256 _totemTokenAmount,
+        uint256 _paymentTokenAmount
+    ) internal returns (uint256 liquidity, address liquidityToken) {
+        if (uniswapV2RouterAddr == address(0)) revert UniswapRouterNotSet();
+
+        IUniswapV2Router02 router = IUniswapV2Router02(uniswapV2RouterAddr);
+
+        // Get the factory address
+        address factoryAddr = router.factory();
+        IUniswapV2Factory factory_ = IUniswapV2Factory(factoryAddr);
+
+        // Get or create the pair
+        liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
+        if (liquidityToken == address(0)) {
+            liquidityToken = factory_.createPair(
+                _totemTokenAddr,
+                _paymentTokenAddr
+            );
+        }
+
+        // Approve tokens for the uni router
+        IERC20(_totemTokenAddr).approve(uniswapV2RouterAddr, _totemTokenAmount);
+        IERC20(_paymentTokenAddr).approve(
+            uniswapV2RouterAddr,
+            _paymentTokenAmount
+        );
+
+        // Add liquidity
+        (, , liquidity) = router.addLiquidity(
+            _totemTokenAddr,
+            _paymentTokenAddr,
+            _totemTokenAmount,
+            _paymentTokenAmount,
+            (_totemTokenAmount * 995) / 1000, // 0.5% slippage
+            (_paymentTokenAmount * 995) / 1000, // 0.5% slippage
+            address(this),
+            block.timestamp + 600 // Deadline: 10 minutes from now
+        );
+
+        if (liquidity == 0) revert LiquidityAdditionFailed();
+
+        emit LiquidityAdded(
+            _totemTokenAddr,
+            _paymentTokenAddr,
+            _totemTokenAmount,
+            _paymentTokenAmount,
+            liquidity
+        );
+
+        return (liquidity, liquidityToken);
+    }
+
+    // VIEW FUNCTIONS
+
+    /**
+     * @notice Returns the token price in USD
+     * @return The current token price in USD (18 decimals)
+     */
+    function getTotemPriceInUsd() external view returns (uint256) {
+        return oneTotemPriceInUsd;
+    }
 
     /**
      * @notice Converts totem tokens to payment tokens based on price
@@ -1485,7 +1573,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /**
      * @notice Returns the price of a given token in USD
-     * @dev Uses Chainlink price feeds to get the token price in USD
+     *      Uses Chainlink price feeds to get the token price in USD
      * @param _tokenAddr Address of the token to get the price for
      * @return Amount of tokens equivalent to 1 USD
      */
@@ -1558,7 +1646,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable {
 
     /**
      * @notice Calculates the number of totem tokens available for purchase
-     * @dev Takes into account the user's current balance and the maximum allowed tokens per address
+     *      Takes into account the user's current balance and the maximum allowed tokens per address
      * @param _userAddr Address of the user
      * @param _totemTokenAddr Address of the totem token
      * @return The number of totem tokens available for purchase
@@ -1638,14 +1726,17 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
 /**
  * @title TotemToken
  * @notice ERC20 token with sale period restrictions and autonomous management
- * @dev Extends ERC20 to manage token distribution and control transfers
+ *      Extends ERC20 to manage token distribution and control transfers
  */
 contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
-    // Indicates if the token is in the sale period (transfers restricted)
-    bool public salePeriod;
+    // State variables
+    bool private salePeriod; // Indicates if the token is in the sale period (transfers restricted)
 
-    // Address of the distributor, the only one who can transfer tokens during sale period
-    address public immutable totemDistributor;
+    // Immutable variables
+    address public immutable totemDistributor; // Address of the distributor, the only one who can transfer tokens during sale period
+
+    // Constants
+    uint256 private constant INITIAL_SUPPLY = 1_000_000_000 ether;
 
     // Events
     event SalePeriodEnded();
@@ -1657,16 +1748,16 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
     error SalePeriodAlreadyEnded();
 
     /**
-     * @dev Mints 1_000_000_000 tokens and assigns them to the distributor
-     * @param name The name of the token
-     * @param symbol The symbol of the token
+     * @notice Mints 1_000_000_000 tokens and assigns them to the distributor
+     * @param _name The name of the token
+     * @param _symbol The symbol of the token
      * @param _totemDistributor The address of the token distributor
      */
     constructor(
-        string memory name, 
-        string memory symbol,
+        string memory _name, 
+        string memory _symbol,
         address _totemDistributor
-    ) ERC20(name, symbol) ERC20Permit(name) {
+    ) ERC20(_name, _symbol) ERC20Permit(_name) {
         if (_totemDistributor == address(0)) revert InvalidAddress();
 
         totemDistributor = _totemDistributor;
@@ -1678,9 +1769,11 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         salePeriod = true;
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
      * @notice Opens token transfers, ending the sale period
-     * @dev Can only be called by the distributor and only once
+     *      Can only be called by the distributor and only once
      */
     function openTransfers() external {
         if (msg.sender != totemDistributor) revert OnlyForDistributor();
@@ -1690,21 +1783,37 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         emit SalePeriodEnded();
     }
 
+    // VIEW FUNCTIONS
+
+    /**
+     * @notice Checks if the token is in the sale period
+     * @return True if the token is in the sale period, false otherwise
+     */
+    function isInSalePeriod() external view returns (bool) {
+        return salePeriod;
+    }
+
+    // INTERNAL FUNCTIONS
+
     /**
      * @notice Updates token balances with transfer restrictions during sale period
-     * @dev Overrides _update from ERC20 to enforce sale period rules
-     * @param from The address sending the tokens
-     * @param to The address receiving the tokens
-     * @param value The amount of tokens being transferred
+     *      Overrides _update from ERC20 to enforce sale period rules
+     * @param _from The address sending the tokens
+     * @param _to The address receiving the tokens
+     * @param _value The amount of tokens being transferred
      */
-    function _update(address from, address to, uint256 value) internal override {
+    function _update(
+        address _from,
+        address _to,
+        uint256 _value
+    ) internal override {
         // During sale period, only the distributor can transfer tokens
         // Burning (transfer to address(0)) is also restricted during sale period
         if (salePeriod && msg.sender != totemDistributor) {
             revert NotAllowedInSalePeriod();
         }
         
-        super._update(from, to, value);
+        super._update(_from, _to, _value);
     }
 }
 
@@ -1724,30 +1833,34 @@ import {TotemToken} from "./TotemToken.sol";
 /**
  * @title Totem
  * @notice This contract represents a Totem in the MYTHO ecosystem, managing token burning and merit distribution
- * @dev Handles the lifecycle of a Totem, including token burning after sale period and merit distribution
+ *      Handles the lifecycle of a Totem, including token burning after sale period and merit distribution
  */
 contract Totem is AccessControlUpgradeable {
     using SafeERC20 for IERC20;
     using SafeERC20 for TotemToken;
 
+    // State variables - Tokens
     TotemToken private totemToken;
     IERC20 private paymentToken;
     IERC20 private liquidityToken;
     IERC20 private mythoToken;
 
+    // State variables - Data
     bytes private dataHash;
 
+    // State variables - Addresses
     address private treasuryAddr;
     address private totemDistributorAddr;
     address private meritManagerAddr;
+    address private owner;
+    address[] private collaborators;
+    address private registryAddr;
 
-    address public owner;
-    address[] public collaborators;
-
+    // State variables - Flags
     bool private isCustomToken;
-    bool public salePeriodEnded;
+    bool private salePeriodEnded;
 
-    bytes32 private constant MANAGER = keccak256("MANAGER");
+    // Constants
     bytes32 private constant TOTEM_DISTRIBUTOR = keccak256("TOTEM_DISTRIBUTOR");
 
     // Events
@@ -1764,12 +1877,23 @@ contract Totem is AccessControlUpgradeable {
     // Custom errors
     error SalePeriodNotEnded();
     error InsufficientTotemBalance();
-    error InsufficientPaymentTokenBalance();
+    error NothingToDistribute();
     error ZeroAmount();
+    error ZeroCirculatingSupply();
+    error InvalidParams();
+    error TotemsPaused();
+
+    /**
+     * @notice Modifier to check if Totems are paused in the AddressRegistry
+     */
+    modifier whenNotPaused() {
+        if (AddressRegistry(registryAddr).areTotemsPaused()) revert TotemsPaused();
+        _;
+    }
 
     /**
      * @notice Initializes the Totem contract with token addresses, data hash, and revenue pool
-     * @dev Sets up the initial state and grants roles
+     *      Sets up the initial state and grants roles
      * @param _totemToken The address of the TotemToken or custom token
      * @param _dataHash The data hash associated with this Totem
      * @param _registryAddr Address of the AddressRegistry contract
@@ -1785,6 +1909,13 @@ contract Totem is AccessControlUpgradeable {
         address _owner,
         address[] memory _collaborators
     ) public initializer {
+        if (
+            address(_totemToken) == address(0) ||
+            _registryAddr == address(0) ||
+            _owner == address(0) ||
+            _dataHash.length == 0
+        ) revert InvalidParams();
+
         __AccessControl_init();
 
         totemToken = _totemToken;
@@ -1794,35 +1925,47 @@ contract Totem is AccessControlUpgradeable {
         totemDistributorAddr = AddressRegistry(_registryAddr)
             .getTotemTokenDistributor();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
-        mythoToken = IERC20(MeritManager(meritManagerAddr).mythoToken());
+        mythoToken = IERC20(AddressRegistry(_registryAddr).getMythoToken());
 
         isCustomToken = _isCustomToken;
         salePeriodEnded = false; // Initially, sale period is active
+        registryAddr = _registryAddr;
 
         // Set owner and collaborators
         owner = _owner;
         collaborators = _collaborators;
 
+        if (_isCustomToken) {
+            paymentToken = IERC20(
+                TotemTokenDistributor(totemDistributorAddr).getPaymentToken()
+            );
+        }
+
         _grantRole(TOTEM_DISTRIBUTOR, totemDistributorAddr);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
      * @notice Allows TotemToken holders to burn or transfer their tokens and receive proportional shares of assets
-     * @dev After the sale period ends, burns TotemTokens for standard tokens or transfers custom tokens to treasuryAddr.
-     *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens.
+     *      After the sale period ends, burns TotemTokens for standard tokens or transfers custom tokens to treasuryAddr.
+     *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens based on circulating supply.
      * @param _totemTokenAmount The amount of TotemToken to burn or transfer
      */
-    function burnTotemTokens(uint256 _totemTokenAmount) external {
-        if (!salePeriodEnded) revert SalePeriodNotEnded();
+    function burnTotemTokens(uint256 _totemTokenAmount) external whenNotPaused {
+        if (!isCustomToken && !salePeriodEnded) revert SalePeriodNotEnded();
         if (totemToken.balanceOf(msg.sender) < _totemTokenAmount)
             revert InsufficientTotemBalance();
         if (_totemTokenAmount == 0) revert ZeroAmount();
 
-        // Get the total supply of TotemToken
-        uint256 totalSupply = totemToken.totalSupply();
+        // Get the circulating supply using the dedicated function
+        uint256 circulatingSupply = getCirculatingSupply();
+        if (circulatingSupply == 0) revert ZeroCirculatingSupply();
 
         // Check balances of all token types
-        uint256 paymentTokenBalance = paymentToken.balanceOf(address(this));
+        uint256 paymentTokenBalance = address(paymentToken) != address(0)
+            ? paymentToken.balanceOf(address(this))
+            : 0;
         uint256 mythoBalance = mythoToken.balanceOf(address(this));
         uint256 lpBalance = address(liquidityToken) != address(0)
             ? liquidityToken.balanceOf(address(this))
@@ -1830,14 +1973,15 @@ contract Totem is AccessControlUpgradeable {
 
         // Check if all balances are zero
         if (paymentTokenBalance == 0 && mythoBalance == 0 && lpBalance == 0) {
-            revert InsufficientPaymentTokenBalance();
+            revert NothingToDistribute();
         }
 
-        // Calculate user share for each token type
+        // Calculate user share for each token type based on circulating supply
         uint256 paymentAmount = (paymentTokenBalance * _totemTokenAmount) /
-            totalSupply;
-        uint256 mythoAmount = (mythoBalance * _totemTokenAmount) / totalSupply;
-        uint256 lpAmount = (lpBalance * _totemTokenAmount) / totalSupply;
+            circulatingSupply;
+        uint256 mythoAmount = (mythoBalance * _totemTokenAmount) /
+            circulatingSupply;
+        uint256 lpAmount = (lpBalance * _totemTokenAmount) / circulatingSupply;
 
         // Take TotemTokens from the caller
         totemToken.safeTransferFrom(
@@ -1883,21 +2027,21 @@ contract Totem is AccessControlUpgradeable {
      * @notice Collects accumulated MYTHO from MeritManager for a specific period
      * @param _periodNum The period number to collect rewards for
      */
-    function collectMYTH(uint256 _periodNum) public {
+    function collectMYTH(uint256 _periodNum) public whenNotPaused {
         MeritManager(meritManagerAddr).claimMytho(_periodNum);
         emit MythoCollected(msg.sender, _periodNum);
     }
 
     /**
      * @notice Sets the payment token and liquidity token addresses and ends the sale period
-     * @dev Should be called by TotemTokenDistributor after sale period ends
+     *      Should be called by TotemTokenDistributor after sale period ends
      * @param _paymentToken The address of the payment token contract
      * @param _liquidityToken The address of the liquidity token (LP token)
      */
     function closeSalePeriod(
         IERC20 _paymentToken,
         IERC20 _liquidityToken
-    ) external onlyRole(TOTEM_DISTRIBUTOR) {
+    ) external onlyRole(TOTEM_DISTRIBUTOR) whenNotPaused {
         paymentToken = _paymentToken;
         liquidityToken = _liquidityToken;
         salePeriodEnded = true;
@@ -1905,9 +2049,11 @@ contract Totem is AccessControlUpgradeable {
         emit SalePeriodEnded();
     }
 
+    // VIEW FUNCTIONS
+
     /**
      * @notice Get the data hash associated with this Totem
-     * @dev Returns the data hash that was set during initialization
+     *      Returns the data hash that was set during initialization
      * @return The data hash stored in the contract
      */
     function getDataHash() external view returns (bytes memory) {
@@ -1961,7 +2107,7 @@ contract Totem is AccessControlUpgradeable {
             ? liquidityToken.balanceOf(address(this))
             : 0;
 
-        address mythoAddr = MeritManager(meritManagerAddr).mythoToken();
+        address mythoAddr = AddressRegistry(registryAddr).getMythoToken();
         mythoBalance = mythoAddr != address(0)
             ? IERC20(mythoAddr).balanceOf(address(this))
             : 0;
@@ -1973,8 +2119,55 @@ contract Totem is AccessControlUpgradeable {
      * @notice Check if this is a custom token Totem
      * @return True if this is a custom token Totem, false otherwise
      */
-    function isCustomTokenTotem() external view returns (bool) {
+    function isCustomTotemToken() external view returns (bool) {
         return isCustomToken;
+    }
+
+    /**
+     * @notice Get the owner of this Totem
+     * @return The address of the Totem owner
+     */
+    function getOwner() external view returns (address) {
+        return owner;
+    }
+
+    /**
+     * @notice Get the collaborator at the specified index
+     * @param _index Index in the collaborators array
+     * @return The address of the collaborator
+     */
+    function getCollaborator(uint256 _index) external view returns (address) {
+        require(_index < collaborators.length, "Index out of bounds");
+        return collaborators[_index];
+    }
+
+    /**
+     * @notice Get all collaborators of this Totem
+     * @return Array of collaborator addresses
+     */
+    function getAllCollaborators() external view returns (address[] memory) {
+        return collaborators;
+    }
+
+    /**
+     * @notice Check if the sale period has ended
+     * @return True if the sale period has ended, false otherwise
+     */
+    function isSalePeriodEnded() external view returns (bool) {
+        return salePeriodEnded;
+    }
+
+    /**
+     * @notice Get the circulating supply of the TotemToken
+     * @return The circulating supply (total supply minus tokens held by Totem and Treasury for custom tokens)
+     */
+    function getCirculatingSupply() public view returns (uint256) {
+        uint256 totalSupply = totemToken.totalSupply();
+        uint256 totemBalance = totemToken.balanceOf(address(this));
+        uint256 treasuryBalance = isCustomToken
+            ? totemToken.balanceOf(treasuryAddr)
+            : 0;
+        return totalSupply - totemBalance - treasuryBalance;
     }
 }
 
@@ -1988,12 +2181,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /**
  * @title MYTHO Government Token
- * @notice Non-upgradeable ERC20 token with fixed supply and vesting distribution
  */
 contract MYTHO is ERC20 {
     using SafeERC20 for ERC20;    
 
-    // Token distribution constants
+    // Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18; // 1 billion tokens with 18 decimals
     
     // Totem incentives distribution (50% of total supply)
@@ -2011,12 +2203,12 @@ contract MYTHO is ERC20 {
     // Mytho AMM incentives (7% of total supply)
     uint256 public constant AMM_INCENTIVES = 70_000_000 * 10**18;
 
-    // Vesting duration constants
+    // Vesting duration
     uint64 public constant ONE_YEAR = 12 * 30 days;
     uint64 public constant TWO_YEARS = 2 * ONE_YEAR;
     uint64 public constant FOUR_YEARS = 4 * ONE_YEAR;
 
-    // Vesting wallet and recipient addresses (immutable)
+    // Vesting wallet and recipient addresses
     address public immutable meritVestingYear1;
     address public immutable meritVestingYear2;
     address public immutable meritVestingYear3;
@@ -2028,9 +2220,9 @@ contract MYTHO is ERC20 {
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
     error OnlyOwnerCanBurn();
+    error InvalidAmount(uint256 amount);
 
     /**
-     * @notice Constructor to deploy the token and set up vesting schedules
      * @param _meritManager Address to receive totem incentives
      * @param _teamReceiver Address to receive team allocation
      * @param _treasuryReceiver Address to receive treasury allocation
@@ -2050,7 +2242,7 @@ contract MYTHO is ERC20 {
         // Set the start timestamp for vesting
         uint64 startTimestamp = uint64(block.timestamp);
         
-        // Create vesting wallets for totem incentives (4 years with annual releases)
+        // Create vesting wallets for totem incentives (4 years)
         meritVestingYear1 = address(new VestingWallet(_meritManager, startTimestamp, ONE_YEAR));
         meritVestingYear2 = address(new VestingWallet(_meritManager, startTimestamp + ONE_YEAR, ONE_YEAR));
         meritVestingYear3 = address(new VestingWallet(_meritManager, startTimestamp + 2 * ONE_YEAR, ONE_YEAR));
@@ -2078,21 +2270,21 @@ contract MYTHO is ERC20 {
         _transfer(address(this), treasury, TREASURY_ALLOCATION);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
      * @notice Burns tokens from the caller's address
-     * @dev Can only be called by the token owner
+     *      Can only be called by the token owner
      * @param _account Address from which tokens are burned
      * @param _amount Amount of tokens to burn
      */
-    function burn(address _account, uint256 _amount) external {
+    function burn(
+        address _account,
+        uint256 _amount
+    ) external {
         if (msg.sender != _account) revert OnlyOwnerCanBurn();
+        if (_amount == 0) revert InvalidAmount(0);
         _burn(_account, _amount);
-    }
-
-    /// TEST LOGIC
-
-    function mint(address _account, uint256 _amount) external {
-        _mint(_account, _amount);
     }
 }
 
@@ -2104,35 +2296,45 @@ import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/acce
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
- * @title RevenuePool
- * @dev This contract manages and withdraws ERC20 and native tokens.
+ * @title Treasury
+ * @notice This contract manages and withdraws ERC20 and native tokens.
  * It provides functionality to:
  * - Withdraw ERC20 tokens to specified addresses
  * - Withdraw native tokens to specified addresses
  * - Check balances of ERC20 and native tokens
  */
 contract Treasury is AccessControlUpgradeable {
+    // Constants
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
+    // Events
     event ERC20Withdrawn(address indexed token, address indexed to, uint256 amount);
     event NativeWithdrawn(address indexed to, uint256 amount);
 
+    // Custom errors
     error ZeroAddress();
     error ZeroAmount();
     error InsufficientBalance(uint256 requested, uint256 available);
+    error NativeTransferFailed();
 
     function initialize() public initializer {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
     }
 
+    // EXTERNAL FUNCTIONS
+
     /**
-     * @dev Withdraws ERC20 tokens, restricted to MANAGER
+     * @notice Withdraws ERC20 tokens, restricted to MANAGER
      * @param _token Address of the ERC20 token to withdraw
      * @param _to Recipient address
      * @param _amount Amount of tokens to withdraw
      */
-    function withdrawERC20(address _token, address _to, uint256 _amount) external onlyRole(MANAGER) {
+    function withdrawERC20(
+        address _token,
+        address _to,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
         if (_token == address(0) || _to == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
         uint256 balance = IERC20(_token).balanceOf(address(this));
@@ -2142,28 +2344,33 @@ contract Treasury is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Withdraws native tokens, restricted to MANAGER
+     * @notice Withdraws native tokens, restricted to MANAGER
      * @param _to Recipient address (payable)
      * @param _amount Amount of native tokens to withdraw (in wei)
      */
-    function withdrawNative(address payable _to, uint256 _amount) external onlyRole(MANAGER) {
+    function withdrawNative(
+        address payable _to,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
         if (_to == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
         if (address(this).balance < _amount) revert InsufficientBalance(_amount, address(this).balance);
+        
         (bool success, ) = _to.call{value: _amount}("");
-        require(success, "Native transfer failed");
+        if (!success) revert NativeTransferFailed();
+        
         emit NativeWithdrawn(_to, _amount);
     }
 
     /**
-     * @dev Allows contract to receive native tokens
+     * @notice Allows contract to receive native tokens
      */
     receive() external payable {}
 
-    /// READERS
+    // VIEW FUNCTIONS
 
     /**
-     * @dev Returns balance of a specific ERC20 token
+     * @notice Returns balance of a specific ERC20 token
      * @param _token Address of the ERC20 token
      * @return Token balance of the contract
      */
@@ -2172,7 +2379,7 @@ contract Treasury is AccessControlUpgradeable {
     }
 
     /**
-     * @dev Returns native token balance
+     * @notice Returns native token balance
      * @return Native token balance of the contract (in wei)
      */
     function getNativeBalance() external view returns (uint256) {

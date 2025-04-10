@@ -45,4 +45,4 @@ contract UpgradeTotem is Script {
     }
 }
 
-// current implementation: 0xDe45bEce6B067CA83CBdecca6a1510f2E5120b3c
+// current implementation: 0x662B0B9cDd2aeAa5AB80b640488248891F07B553
