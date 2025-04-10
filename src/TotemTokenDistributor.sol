@@ -553,15 +553,6 @@ contract TotemTokenDistributor is
         address factoryAddr = router.factory();
         IUniswapV2Factory factory_ = IUniswapV2Factory(factoryAddr);
 
-        // Get or create the pair
-        liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
-        if (liquidityToken == address(0)) {
-            liquidityToken = factory_.createPair(
-                _totemTokenAddr,
-                _paymentTokenAddr
-            );
-        }
-
         // Approve tokens for the uni router
         IERC20(_totemTokenAddr).approve(uniswapV2RouterAddr, _totemTokenAmount);
         IERC20(_paymentTokenAddr).approve(
@@ -575,11 +566,13 @@ contract TotemTokenDistributor is
             _paymentTokenAddr,
             _totemTokenAmount,
             _paymentTokenAmount,
-            (_totemTokenAmount * 995) / 1000, // 0.5% slippage
-            (_paymentTokenAmount * 995) / 1000, // 0.5% slippage
+            (_totemTokenAmount * 950) / 1000, // 5% slippage
+            (_paymentTokenAmount * 950) / 1000, // 5% slippage
             address(this),
             block.timestamp + 600 // Deadline: 10 minutes from now
         );
+
+        liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
 
         if (liquidity == 0) revert LiquidityAdditionFailed();
 
