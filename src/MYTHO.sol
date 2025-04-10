@@ -1,22 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Upgradeable} from "@openzeppelin-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
+import {ERC20PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /**
- * @title MYTHO Government Token
+ * @title MYTHO Government Token (Upgradeable)
  */
-contract MYTHO is ERC20 {
-    using SafeERC20 for ERC20;
+contract MYTHO is
+    Initializable,
+    ERC20Upgradeable,
+    ERC20PausableUpgradeable,
+    OwnableUpgradeable
+{
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     // Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
 
     // Totem incentives distribution (50% of total supply)
-    uint256 public constant MERIT_YEAR_1 = 175_000_000 * 10 ** 18; // 35% of incentives
-    uint256 public constant MERIT_YEAR_2 = 125_000_000 * 10 ** 18; // 25% of incentives
+    uint256 public constant MERIT_YEAR_1 = 200_000_000 * 10 ** 18; // 40% of incentives
+    uint256 public constant MERIT_YEAR_2 = 150_000_000 * 10 ** 18; // 30% of incentives
     uint256 public constant MERIT_YEAR_3 = 100_000_000 * 10 ** 18; // 20% of incentives
     uint256 public constant MERIT_YEAR_4 = 50_000_000 * 10 ** 18; // 10% of incentives
 
@@ -35,31 +43,40 @@ contract MYTHO is ERC20 {
     uint64 public constant FOUR_YEARS = 4 * ONE_YEAR;
 
     // Vesting wallet and recipient addresses
-    address public immutable meritVestingYear1;
-    address public immutable meritVestingYear2;
-    address public immutable meritVestingYear3;
-    address public immutable meritVestingYear4;
-    address public immutable teamVesting;
-    address public immutable ammVesting;
-    address public immutable treasury;
+    address public meritVestingYear1;
+    address public meritVestingYear2;
+    address public meritVestingYear3;
+    address public meritVestingYear4;
+    address public teamVesting;
+    address public ammVesting;
+    address public treasury;
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
-    error OnlyOwnerCanBurn();
     error InvalidAmount(uint256 amount);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
+     * @notice Initializes the MYTHO token contract
      * @param _meritManager Address to receive totem incentives
      * @param _teamReceiver Address to receive team allocation
      * @param _treasuryReceiver Address to receive treasury allocation
      * @param _ammReceiver Address to receive AMM incentives
      */
-    constructor(
+    function initialize(
         address _meritManager,
         address _teamReceiver,
         address _treasuryReceiver,
         address _ammReceiver
-    ) ERC20("MYTHO Government Token", "MYTHO") {
+    ) public initializer {
+        __ERC20_init("MYTHO Government Token", "MYTHO");
+        __ERC20Pausable_init();
+        __Ownable_init(msg.sender);
+
         if (_meritManager == address(0))
             revert ZeroAddressNotAllowed("totem receiver");
         if (_teamReceiver == address(0))
@@ -124,17 +141,35 @@ contract MYTHO is ERC20 {
         _transfer(address(this), treasury, TREASURY_ALLOCATION);
     }
 
-    // EXTERNAL FUNCTIONS
+    // ADMIN FUNCTIONS
+    
+    /**
+     * @notice Pauses all token transfers
+     */
+    function pause() public onlyOwner {
+        _pause();
+    }
 
     /**
-     * @notice Burns tokens from the caller's address
-     *      Can only be called by the token owner
-     * @param _account Address from which tokens are burned
-     * @param _amount Amount of tokens to burn
+     * @notice Unpauses all token transfers
      */
-    function burn(address _account, uint256 _amount) external {
-        if (msg.sender != _account) revert OnlyOwnerCanBurn();
-        if (_amount == 0) revert InvalidAmount(0);
-        _burn(_account, _amount);
+    function unpause() public onlyOwner {
+        _unpause();
+    }
+
+    // INTERNAL FUNCTIONS
+
+    /**
+     * @notice Internal function to update token balances
+     * @param from The address to transfer from
+     * @param to The address to transfer to
+     * @param value The amount to transfer
+     */
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    ) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) {
+        super._update(from, to, value);
     }
 }
