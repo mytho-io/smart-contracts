@@ -51,6 +51,8 @@ contract Deploy is Script {
     AddressRegistry registryImpl;
     AddressRegistry registry;
 
+    TransparentUpgradeableProxy mythoProxy;
+    MYTHO mythoImpl;
     MYTHO mytho;
     MockToken paymentToken;
     MockToken astrToken;
@@ -115,8 +117,15 @@ contract Deploy is Script {
         );
         mm = MM(address(mmProxy));
 
-        // MYTHO
-        mytho = new MYTHO(address(mm), deployer, deployer, deployer);
+        // MYTHO - Upgradeable implementation
+        mythoImpl = new MYTHO();
+        mythoProxy = new TransparentUpgradeableProxy(
+            address(mythoImpl),
+            deployer,
+            ""
+        );
+        mytho = MYTHO(address(mythoProxy));
+        mytho.initialize(address(mm), deployer, deployer, deployer);
 
         address[4] memory vestingAddresses = [
             mytho.meritVestingYear1(),
