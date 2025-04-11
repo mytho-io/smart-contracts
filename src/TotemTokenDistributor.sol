@@ -176,6 +176,7 @@ contract TotemTokenDistributor is
     function register() external whenNotPaused {
         if (address(factory) == address(0)) revert AlreadySet();
         if (msg.sender != address(factory)) revert OnlyFactory();
+        if (paymentTokenAddr == address(0)) revert ZeroAddress();
 
         // get info about the totem being created
         TotemFactory.TotemData memory totemDataFromFactory = factory

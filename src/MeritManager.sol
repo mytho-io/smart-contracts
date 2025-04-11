@@ -107,6 +107,10 @@ contract MeritManager is
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
 
+        for (uint i = 0; i < 4; i++) {
+            if (_vestingWallets[i] == address(0)) revert InvalidAddress();
+        }
+
         registryAddr = _registryAddr;
         mythoToken = AddressRegistry(_registryAddr).getMythoToken();
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
@@ -324,8 +328,7 @@ contract MeritManager is
     function setPeriodDuration(
         uint256 _newPeriodDuration
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (_newPeriodDuration == 0) revert InvalidPeriodDuration();
-        _updateState();
+        if (_newPeriodDuration < 1 days) revert InvalidPeriodDuration();
 
         // Store the current period count before changing the duration
         accumulatedPeriods = currentPeriod();

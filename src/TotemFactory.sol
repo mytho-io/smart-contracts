@@ -91,8 +91,9 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         _grantRole(MANAGER, msg.sender);
 
         // Initialize fee settings
-        if (_feeTokenAddr == address(0)) revert ZeroAddress();
         if (_registryAddr == address(0)) revert ZeroAddress();
+        if (_beaconAddr == address(0)) revert ZeroAddress();
+        if (_feeTokenAddr == address(0)) revert ZeroAddress();
 
         totemDistributor = TotemTokenDistributor(
             AddressRegistry(_registryAddr).getTotemTokenDistributor()
