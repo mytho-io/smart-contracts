@@ -37,6 +37,7 @@ contract TotemTokenDistributor is
     // State variables - Configuration
     uint256 private oneTotemPriceInUsd;
     uint256 public maxTokensPerAddress;
+    uint256 public slippagePercentage = 50; // Default 5% slippage (50/1000)
 
     // State variables - Distribution shares
     uint256 public revenuePaymentTokenShare;
@@ -121,11 +122,8 @@ contract TotemTokenDistributor is
     error NotAllowedForCustomTokens();
     error UnknownTotemToken(address tokenAddr);
     error WrongAmount(uint256 tokenAmount);
-    error NotPaymentToken(address tokenAddr);
-    error OnlyInSalePeriod();
     error SalePeriodAlreadyEnded();
     error WrongPaymentTokenAmount(uint256 paymentTokenAmount);
-    error OnlyForTotem();
     error AlreadySet();
     error OnlyFactory();
     error ZeroAddress();
@@ -561,14 +559,18 @@ contract TotemTokenDistributor is
             _paymentTokenAmount
         );
 
+        // Calculate minimum amounts based on slippage percentage
+        uint256 minTotemAmount = (_totemTokenAmount * (PRECISION - slippagePercentage)) / PRECISION;
+        uint256 minPaymentAmount = (_paymentTokenAmount * (PRECISION - slippagePercentage)) / PRECISION;
+
         // Add liquidity
         (, , liquidity) = router.addLiquidity(
             _totemTokenAddr,
             _paymentTokenAddr,
             _totemTokenAmount,
             _paymentTokenAmount,
-            (_totemTokenAmount * 950) / 1000, // 5% slippage
-            (_paymentTokenAmount * 950) / 1000, // 5% slippage
+            minTotemAmount,
+            minPaymentAmount,
             address(this),
             block.timestamp + 600 // Deadline: 10 minutes from now
         );
@@ -639,9 +641,9 @@ contract TotemTokenDistributor is
 
         if (priceFeedAddr == address(0)) {
             // If no price feed is set for this token, return a default value. For test purposes
-            return 0.05 * 1e18;
+            // return 0.05 * 1e18;
 
-            // revert NoPriceFeedSet(_tokenAddr);
+            revert NoPriceFeedSet(_tokenAddr);
         }
 
         // Get the latest price from Chainlink
@@ -769,5 +771,25 @@ contract TotemTokenDistributor is
             poolPaymentTokenShare,
             vaultPaymentTokenShare
         );
+    }
+
+    /**
+     * @notice Sets the slippage percentage for liquidity addition
+     * @param _slippagePercentage New slippage percentage (multiplied by PRECISION)
+     * @dev For example, 50 = 0.5%, 500 = 5%, 1000 = 10%
+     */
+    function setSlippagePercentage(
+        uint256 _slippagePercentage
+    ) external onlyRole(MANAGER) {
+        if (_slippagePercentage >= PRECISION) revert InvalidShares();
+        slippagePercentage = _slippagePercentage;
+    }
+
+    /**
+     * @notice Returns the current slippage percentage
+     * @return The current slippage percentage (multiplied by PRECISION)
+     */
+    function getSlippagePercentage() external view returns (uint256) {
+        return slippagePercentage;
     }
 }
