@@ -7,6 +7,7 @@ import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {MYTHO} from "../src/MYTHO.sol";
+import {AddressRegistry} from "../src/AddressRegistry.sol";
 
 contract VestingTest is Test {
     TransparentUpgradeableProxy mythoProxy;
@@ -23,6 +24,10 @@ contract VestingTest is Test {
         beneficiaryA = makeAddr("beneficiaryA");
 
         prank(deployer);
+        // Deploy and initialize the AddressRegistry
+        AddressRegistry registry = new AddressRegistry();
+        registry.initialize();
+
         mythoImpl = new MYTHO();
         mythoProxy = new TransparentUpgradeableProxy(
             address(mythoImpl),
@@ -30,7 +35,7 @@ contract VestingTest is Test {
             ""
         );
         mytho = MYTHO(address(mythoProxy));
-        mytho.initialize(deployer, deployer, deployer, deployer);
+        mytho.initialize(deployer, deployer, deployer, deployer, address(registry));
         vestingWallet = new VestingWallet(beneficiaryA, 100, 1000);
         deal(address(mytho), address(vestingWallet), 100e18);
     }

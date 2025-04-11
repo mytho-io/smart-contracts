@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 
+import {AddressRegistry} from "../src/AddressRegistry.sol";
 import {CCIPLocalSimulator} from "../lib/chainlink-local/src/ccip/CCIPLocalSimulator.sol";
 import {IRouterClient} from "../lib/chainlink-local/lib/ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {WETH9} from "../lib/chainlink-local/src/shared/WETH9.sol";
@@ -56,7 +57,7 @@ contract CCIPTest is Test {
             WETH9 wrappedNative, // Native token
             LinkToken linkToken,
             ,
-
+            // 7th return value
         ) = ccipLocalSimulator.configuration();
 
         wastrL2 = wrappedNative;
@@ -67,6 +68,10 @@ contract CCIPTest is Test {
 
         // Deploy MYTHO tokens on both chains
         vm.startPrank(deployer);
+
+        // Deploy and initialize the AddressRegistry
+        AddressRegistry registry = new AddressRegistry();
+        registry.initialize();
 
         // Deploy source chain MYTHO
         MYTHO mythoSourceImpl = new MYTHO();
@@ -80,7 +85,8 @@ contract CCIPTest is Test {
             deployer, // _meritManager
             deployer, // _teamReceiver
             deployer, // _treasuryReceiver
-            deployer // _ammReceiver
+            deployer, // _ammReceiver
+            address(registry) // _registryAddr - use the actual registry contract
         );
 
         // Deploy destination chain BurnMintMYTHO

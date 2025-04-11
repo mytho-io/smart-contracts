@@ -1836,7 +1836,7 @@ contract ComplexTest is Test {
             ""
         );
         mytho = MYTHO(address(mythoProxy));
-        mytho.initialize(address(mm), deployer, deployer, deployer);
+        mytho.initialize(address(mm), deployer, deployer, deployer, address(registry));
 
         address[4] memory vestingAddresses = [
             mytho.meritVestingYear1(),
