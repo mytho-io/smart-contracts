@@ -38,8 +38,6 @@ contract BurnMintMYTHO is
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
-    error OnlyOwnerCanBurn();
-    error InvalidAmount(uint256 amount);
     error SenderNotMinter(address sender);
     error SenderNotBurner(address sender);
 

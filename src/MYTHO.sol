@@ -57,7 +57,6 @@ contract MYTHO is
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
-    error InvalidAmount(uint256 amount);
     error EcosystemPaused();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
