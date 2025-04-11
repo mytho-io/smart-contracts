@@ -9,6 +9,7 @@ import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 
 import {MYTHO} from "../src/MYTHO.sol";
 import {BurnMintMYTHO} from "../src/BurnMintMYTHO.sol";
+import {AddressRegistry} from "../src/AddressRegistry.sol";
 
 contract MythoTest is Test {
     MYTHO mytho;
@@ -20,6 +21,11 @@ contract MythoTest is Test {
     BurnMintMYTHO burnMintMytho;
     BurnMintMYTHO burnMintMythoImpl;
     TransparentUpgradeableProxy burnMintProxy;
+    
+    // Address registry
+    AddressRegistry registry;
+    AddressRegistry registryImpl;
+    TransparentUpgradeableProxy registryProxy;
 
     address deployer;
     address meritManager;
@@ -29,6 +35,7 @@ contract MythoTest is Test {
     address minter;
     address burner;
     address user;
+    address manager;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
     uint256 public constant MERIT_YEAR_1 = 200_000_000 * 10 ** 18;
@@ -48,14 +55,29 @@ contract MythoTest is Test {
         minter = makeAddr("minter");
         burner = makeAddr("burner");
         user = makeAddr("user");
+        manager = makeAddr("manager");
 
         vm.startPrank(deployer);
         
-        // Deploy MYTHO implementation (native chain token)
-        mythoImpl = new MYTHO();
-        
         // Deploy proxy admin
         proxyAdmin = new ProxyAdmin(deployer);
+        
+        // Deploy and initialize AddressRegistry
+        registryImpl = new AddressRegistry();
+        bytes memory registryInitData = abi.encodeWithSelector(
+            AddressRegistry.initialize.selector
+        );
+        
+        registryProxy = new TransparentUpgradeableProxy(
+            address(registryImpl),
+            address(proxyAdmin),
+            registryInitData
+        );
+        
+        registry = AddressRegistry(address(registryProxy));
+        
+        // Deploy MYTHO implementation (native chain token)
+        mythoImpl = new MYTHO();
         
         // Prepare initialization data for MYTHO
         bytes memory initData = abi.encodeWithSelector(
@@ -63,7 +85,8 @@ contract MythoTest is Test {
             meritManager,
             teamReceiver,
             treasuryReceiver,
-            ammReceiver
+            ammReceiver,
+            address(registry)
         );
         
         // Deploy MYTHO proxy
@@ -135,7 +158,8 @@ contract MythoTest is Test {
             address(0),
             teamReceiver,
             treasuryReceiver,
-            ammReceiver
+            ammReceiver,
+            address(registry)
         );
         
         vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "totem receiver"));
@@ -151,7 +175,8 @@ contract MythoTest is Test {
             meritManager,
             address(0),
             treasuryReceiver,
-            ammReceiver
+            ammReceiver,
+            address(registry)
         );
         
         vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "team receiver"));
@@ -386,6 +411,48 @@ contract MythoTest is Test {
         burnMintMytho.grantBurnAccess(address(0));
     }
 
+    // Test ecosystem pause functionality
+    function test_EcosystemPause() public {
+        // Grant manager role to the manager address
+        vm.prank(deployer);
+        registry.grantRole(keccak256("MANAGER"), manager);
+        
+        // Verify registry address is set in MYTHO
+        assertEq(mytho.registryAddr(), address(registry));
+        
+        // Initially ecosystem should not be paused
+        assertFalse(registry.isEcosystemPaused());
+        
+        // Transfer should work when ecosystem is not paused
+        uint256 treasuryBalance = mytho.balanceOf(treasuryReceiver);
+        vm.prank(treasuryReceiver);
+        mytho.transfer(user, 1000 * 10**18);
+        assertEq(mytho.balanceOf(user), 1000 * 10**18);
+        assertEq(mytho.balanceOf(treasuryReceiver), treasuryBalance - 1000 * 10**18);
+        
+        // Pause the ecosystem
+        vm.prank(manager);
+        registry.setEcosystemPaused(true);
+        assertTrue(registry.isEcosystemPaused());
+        
+        // Transfer should be blocked when ecosystem is paused
+        vm.prank(treasuryReceiver);
+        vm.expectRevert(abi.encodeWithSelector(MYTHO.EcosystemPaused.selector));
+        mytho.transfer(user, 1000 * 10**18);
+        
+        // Unpause the ecosystem
+        vm.prank(manager);
+        registry.setEcosystemPaused(false);
+        assertFalse(registry.isEcosystemPaused());
+        
+        // Transfer should work again after ecosystem is unpaused
+        treasuryBalance = mytho.balanceOf(treasuryReceiver);
+        vm.prank(treasuryReceiver);
+        mytho.transfer(user, 1000 * 10**18);
+        assertEq(mytho.balanceOf(user), 2000 * 10**18);
+        assertEq(mytho.balanceOf(treasuryReceiver), treasuryBalance - 1000 * 10**18);
+    }
+    
     function test_VestingSchedule() public {
         // Get vesting wallet addresses
         address meritVestingYear1 = mytho.meritVestingYear1();
