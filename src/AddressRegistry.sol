@@ -47,7 +47,7 @@ contract AddressRegistry is AccessControlUpgradeable {
         _grantRole(MANAGER, msg.sender);
     }
 
-    // EXTERNAL FUNCTIONS
+    // ADMIN FUNCTIONS
 
     /**
      * @notice Sets or updates an address in the registry

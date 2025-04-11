@@ -12,6 +12,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 import {MYTHO} from "../src/MYTHO.sol";
+import {BurnMintMYTHO} from "../src/BurnMintMYTHO.sol";
 
 import {IERC20} from "lib/ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
 
@@ -25,7 +26,6 @@ interface ITokenAdminRegistry {
     function setPool(address localToken, address pool) external;
 }
 
-
 /**
  * @title MYTHO CCIP adjustemts between Soneium and Astar
  */
@@ -33,7 +33,7 @@ contract MythoCcipSetup is Script {
     LockReleaseTokenPool poolSoneium;
     BurnMintTokenPool poolAstar;
     MYTHO mythoSoneium;
-    MYTHO mythoAstar;
+    BurnMintMYTHO mythoAstar;
     TransparentUpgradeableProxy proxySoneium;
     TransparentUpgradeableProxy proxyAstar;
 
@@ -82,97 +82,72 @@ contract MythoCcipSetup is Script {
     } // prettier-ignore
 
     function run() public {
-        // setup
+        // do
 
-        // address poolAstar = 0x893855bd21519CA7c321BEB1cdd493473dF0582e;
-        // address poolSoneium = 0xc071B8E36B6bC20990951848Ee9997bAEFb07113;
-        // address mythoAstar = 0xCFA795310bD2b2bf0E50fc50D3559B4aD591b74E;
-        // address mythoSoneium = 0x197dB89FBbad7C0D23feA80539c20F2F05Ca694F;
+        // _deployMythoAndPools();
 
-        fork(soneium);
+        address poolSoneium = 0x70dBD7ed5A30469a48E9e55e4AA63b1a0E6ffBe7;
+        address mythoSoneium = 0x00279E93880f463Deb2Ce10773f12d3893554141;
+        address poolAstar = 0xc85A7CC52df962d4E30854F9cE7ee74F9F428d9C;
+        address mythoAstar = 0x3A7651a5D19E0aab37F455aAd43b9E182d80014D;
 
-        TokenPool.ChainUpdate[]
-            memory chainUpdatesSoneium = new TokenPool.ChainUpdate[](1);
-        chainUpdatesSoneium[0] = TokenPool.ChainUpdate({
-            remoteChainSelector: chainSelectorAstar, // astar's selector
-            allowed: true,
-            remotePoolAddress: abi.encode(address(poolAstar)),
-            remoteTokenAddress: abi.encode(address(mythoAstar)),
-            outboundRateLimiterConfig: RateLimiter.Config(false, 0, 0),
-            inboundRateLimiterConfig: RateLimiter.Config(false, 0, 0)
-        });
+        // fork(soneium);
+        // console.log(IERC20(mythoSoneium).balanceOf(deployer));
+        // console.log(IERC20(mythoSoneium).totalSupply());
 
-        registryModuleOwnerCustomSoneium.registerAdminViaOwner(address(mythoSoneium));
-        tokenAdminRegistrySoneium.acceptAdminRole(address(mythoSoneium));
-        tokenAdminRegistrySoneium.setPool(
-            address(mythoSoneium),
-            address(poolSoneium)
-        );
-        LockReleaseTokenPool(poolSoneium).applyChainUpdates(chainUpdatesSoneium);
-        LockReleaseTokenPool(poolSoneium).setRemotePool(
-            chainSelectorAstar,
-            abi.encode(address(poolAstar))
-        );
+        fork(astar);
+        console.log(IERC20(mythoAstar).balanceOf(deployer));
+        console.log(IERC20(mythoAstar).totalSupply());
 
-        // fork(astar);
+        console.log(BurnMintMYTHO(mythoAstar).isMinter(poolAstar));
+        console.log(BurnMintMYTHO(mythoAstar).isBurner(poolAstar));
 
-        // TokenPool.ChainUpdate[]
-        //     memory chainUpdatesSoneium = new TokenPool.ChainUpdate[](1);
-        // chainUpdatesSoneium[0] = TokenPool.ChainUpdate({
-        //     remoteChainSelector: chainSelectorSoneium,
-        //     allowed: true,
-        //     remotePoolAddress: abi.encode(address(poolSoneium)),
-        //     remoteTokenAddress: abi.encode(address(mythoSoneium)),
-        //     outboundRateLimiterConfig: RateLimiter.Config(false, 0, 0),
-        //     inboundRateLimiterConfig: RateLimiter.Config(false, 0, 0)
-        // });
-
-        // registryModuleOwnerCustomAstar.registerAdminViaOwner(address(mythoAstar));
-        // tokenAdminRegistryAstar.acceptAdminRole(address(mythoAstar));
-        // tokenAdminRegistryAstar.setPool(
-        //     address(mythoAstar),
-        //     address(poolAstar)
+        // _grantMintBurnAccess(
+        //     mythoAstar,
+        //     poolAstar
         // );
-        // BurnMintTokenPool(poolAstar).applyChainUpdates(chainUpdatesSoneium);
-        // BurnMintTokenPool(poolAstar).setRemotePool(
-        //     chainSelectorSoneium,
-        //     abi.encode(address(poolSoneium))
+
+        // _ccipSetUp(
+        //     mythoAstar,
+        //     poolAstar,
+        //     mythoSoneium,
+        //     poolSoneium
         // );
     }
 
-    function deployMythoAndPools() public {
-        fork(soneium);
+    function _deployMythoAndPools() internal {
+        // fork(soneium);
 
-        MYTHO mythoSoneiumImpl = new MYTHO();
-        proxySoneium = new TransparentUpgradeableProxy(
-            address(mythoSoneiumImpl),
-            deployer,
-            ""
-        );
-        mythoSoneium = MYTHO(address(proxySoneium));
-        mythoSoneium.initialize(deployer, deployer, deployer, deployer);
+        // MYTHO mythoSoneiumImpl = new MYTHO();
+        // proxySoneium = new TransparentUpgradeableProxy(
+        //     address(mythoSoneiumImpl),
+        //     deployer,
+        //     ""
+        // );
+        // mythoSoneium = MYTHO(address(proxySoneium));
+        // mythoSoneium.initialize(deployer, deployer, deployer, deployer);
 
-        poolSoneium = new LockReleaseTokenPool(
-            IERC20(address(mythoSoneium)), // token
-            new address[](0), // allowlist
-            rmnProxySoneium, // rmnProxy
-            false, // acceptLiquidity
-            routerSoneium // router
-        );
+        // poolSoneium = new LockReleaseTokenPool(
+        //     IERC20(address(mythoSoneium)), // token
+        //     new address[](0), // allowlist
+        //     rmnProxySoneium, // rmnProxy
+        //     false, // acceptLiquidity
+        //     routerSoneium // router
+        // );
 
-        console.log("Soneium pool deployed at: %s", address(poolSoneium));
-        console.log("Soneium MYTHO deployed at: %s", address(mythoSoneium));
+        // console.log("Soneium pool deployed at: %s", address(poolSoneium));
+        // console.log("Soneium MYTHO deployed at: %s", address(mythoSoneium));
 
         fork(astar);
 
-        MYTHO mythoAstarImpl = new MYTHO();
+        BurnMintMYTHO mythoAstarImpl = new BurnMintMYTHO();
         proxyAstar = new TransparentUpgradeableProxy(
             address(mythoAstarImpl),
             deployer,
             ""
         );
-        mythoAstar = MYTHO(address(proxyAstar));
-        mythoAstar.initialize(deployer, deployer, deployer, deployer);
+        mythoAstar = BurnMintMYTHO(address(proxyAstar));
+        mythoAstar.initialize();
 
         poolAstar = new BurnMintTokenPool(
             IBurnMintERC20(address(mythoAstar)),
@@ -185,6 +160,77 @@ contract MythoCcipSetup is Script {
         console.log("Astar MYTHO deployed at: %s", address(mythoAstar));
     }
 
+    function _grantMintBurnAccess(
+        address _mythoAstar,
+        address _poolAstar
+    ) internal {
+        fork(astar);
+
+        BurnMintMYTHO(_mythoAstar).grantMintAccess(_poolAstar);
+        BurnMintMYTHO(_mythoAstar).grantBurnAccess(_poolAstar);
+    }
+
+    function _ccipSetUp(
+        address _mythoAstar,
+        address _poolAstar,
+        address _mythoSoneium,
+        address _poolSoneium
+    ) internal {
+        // fork(soneium);
+
+        // TokenPool.ChainUpdate[]
+        //     memory chainUpdatesSoneium = new TokenPool.ChainUpdate[](1);
+        // chainUpdatesSoneium[0] = TokenPool.ChainUpdate({
+        //     remoteChainSelector: chainSelectorAstar, // astar's selector
+        //     allowed: true,
+        //     remotePoolAddress: abi.encode(address(_poolAstar)),
+        //     remoteTokenAddress: abi.encode(address(_mythoAstar)),
+        //     outboundRateLimiterConfig: RateLimiter.Config(false, 0, 0),
+        //     inboundRateLimiterConfig: RateLimiter.Config(false, 0, 0)
+        // });
+
+        // registryModuleOwnerCustomSoneium.registerAdminViaOwner(
+        //     address(_mythoSoneium)
+        // );
+        // tokenAdminRegistrySoneium.acceptAdminRole(address(_mythoSoneium));
+        // tokenAdminRegistrySoneium.setPool(
+        //     address(_mythoSoneium),
+        //     address(_poolSoneium)
+        // );
+        // LockReleaseTokenPool(_poolSoneium).applyChainUpdates(
+        //     chainUpdatesSoneium
+        // );
+        // LockReleaseTokenPool(_poolSoneium).setRemotePool(
+        //     chainSelectorAstar,
+        //     abi.encode(address(_poolAstar))
+        // );
+
+        fork(astar);
+
+        TokenPool.ChainUpdate[]
+            memory chainUpdatesSoneium = new TokenPool.ChainUpdate[](1);
+        chainUpdatesSoneium[0] = TokenPool.ChainUpdate({
+            remoteChainSelector: chainSelectorSoneium,
+            allowed: true,
+            remotePoolAddress: abi.encode(address(_poolSoneium)),
+            remoteTokenAddress: abi.encode(address(_mythoSoneium)),
+            outboundRateLimiterConfig: RateLimiter.Config(false, 0, 0),
+            inboundRateLimiterConfig: RateLimiter.Config(false, 0, 0)
+        });
+
+        registryModuleOwnerCustomAstar.registerAdminViaOwner(address(_mythoAstar));
+        tokenAdminRegistryAstar.acceptAdminRole(address(_mythoAstar));
+        tokenAdminRegistryAstar.setPool(
+            address(_mythoAstar),
+            address(_poolAstar)
+        );
+        BurnMintTokenPool(_poolAstar).applyChainUpdates(chainUpdatesSoneium);
+        BurnMintTokenPool(_poolAstar).setRemotePool(
+            chainSelectorSoneium,
+            abi.encode(address(_poolSoneium))
+        );
+    }
+
     function fork(uint256 _forkId) internal {
         try vm.stopBroadcast() {} catch {}
         vm.selectFork(_forkId);
@@ -192,7 +238,7 @@ contract MythoCcipSetup is Script {
     }
 }
 
-//   Soneium pool deployed at: 0xc071B8E36B6bC20990951848Ee9997bAEFb07113
-//   Soneium MYTHO deployed at: 0x197dB89FBbad7C0D23feA80539c20F2F05Ca694F
-//   Astar pool deployed at: 0x893855bd21519CA7c321BEB1cdd493473dF0582e
-//   Astar MYTHO deployed at: 0xCFA795310bD2b2bf0E50fc50D3559B4aD591b74E
+//   Soneium pool deployed at: 0x70dBD7ed5A30469a48E9e55e4AA63b1a0E6ffBe7
+//   Soneium MYTHO deployed at: 0x00279E93880f463Deb2Ce10773f12d3893554141
+//   Astar pool deployed at: 0xc85A7CC52df962d4E30854F9cE7ee74F9F428d9C
+//   Astar MYTHO deployed at: 0x3A7651a5D19E0aab37F455aAd43b9E182d80014D

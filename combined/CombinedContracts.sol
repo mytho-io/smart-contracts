@@ -20,13 +20,18 @@ import {Totem} from "./Totem.sol";
  * Includes features like totem registration, merit crediting, boosting, and claiming rewards.
  * Contract can be paused in emergency situations.
  */
-contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+contract MeritManager is
+    AccessControlUpgradeable,
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable
+{
     using SafeERC20 for IERC20;
     using Address for address payable;
 
     // State variables
     address private mythoToken;
     address private treasuryAddr;
+    address private registryAddr;
     address[4] private vestingWallets;
     uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
@@ -86,6 +91,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
     error InsufficientTotemBalance();
     error InvalidPeriodDuration();
     error ZeroAmount();
+    error EcosystemPaused();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -103,6 +109,7 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
 
+        registryAddr = _registryAddr;
         mythoToken = AddressRegistry(_registryAddr).getMythoToken();
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
 
@@ -143,7 +150,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      * @notice Allows a user to boost a totem by paying a fee
      * @param _totemAddr Address of the totem to boost
      */
-    function boostTotem(address _totemAddr) external payable nonReentrant whenNotPaused {
+    function boostTotem(
+        address _totemAddr
+    ) external payable nonReentrant whenNotPaused {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
@@ -187,7 +196,9 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      * @notice Allows a totem to claim MYTHO tokens for a specific period
      * @param _periodNum Period number to claim for
      */
-    function claimMytho(uint256 _periodNum) external nonReentrant whenNotPaused {
+    function claimMytho(
+        uint256 _periodNum
+    ) external nonReentrant whenNotPaused {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
@@ -317,11 +328,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newPeriodDuration == 0) revert InvalidPeriodDuration();
         _updateState();
-        
+
         // Store the current period count before changing the duration
         accumulatedPeriods = currentPeriod();
         startTime = block.timestamp; // Reset the start time to now
-        
+
         periodDuration = _newPeriodDuration;
         lastProcessedPeriod = currentPeriod();
         emit ParameterUpdated("periodDuration", _newPeriodDuration);
@@ -364,6 +375,16 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function unpause() external onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     // INTERNAL FUNCTIONS
@@ -411,7 +432,8 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function currentPeriod() public view returns (uint256) {
         if (block.timestamp < startTime) return accumulatedPeriods;
-        return accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
+        return
+            accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
     }
 
     /**
@@ -420,8 +442,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function isMythum() public view returns (bool) {
         uint256 currentPeriodNumber = currentPeriod();
-        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
-        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
+        uint256 periodsAfterAccumulation = currentPeriodNumber -
+            accumulatedPeriods;
+        uint256 currentPeriodStart = startTime +
+            (periodsAfterAccumulation * periodDuration);
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
         return block.timestamp >= mythumStart;
     }
@@ -492,9 +516,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
         if (_periodNum < accumulatedPeriods) {
             return (0, 0); // Indicate that we can't determine bounds for historical periods
         }
-        
+
         uint256 periodsAfterAccumulation = _periodNum - accumulatedPeriods;
-        periodStartTime = startTime + (periodsAfterAccumulation * periodDuration);
+        periodStartTime =
+            startTime +
+            (periodsAfterAccumulation * periodDuration);
         endTime = periodStartTime + periodDuration;
         return (periodStartTime, endTime);
     }
@@ -505,9 +531,11 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function getTimeUntilNextPeriod() external view returns (uint256) {
         uint256 currentPeriodNumber = currentPeriod();
-        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
-        uint256 nextPeriodStart = startTime + ((periodsAfterAccumulation + 1) * periodDuration);
-        
+        uint256 periodsAfterAccumulation = currentPeriodNumber -
+            accumulatedPeriods;
+        uint256 nextPeriodStart = startTime +
+            ((periodsAfterAccumulation + 1) * periodDuration);
+
         if (block.timestamp >= nextPeriodStart) {
             return 0;
         }
@@ -520,8 +548,10 @@ contract MeritManager is AccessControlUpgradeable, ReentrancyGuardUpgradeable, P
      */
     function getCurrentMythumStart() external view returns (uint256) {
         uint256 currentPeriodNumber = currentPeriod();
-        uint256 periodsAfterAccumulation = currentPeriodNumber - accumulatedPeriods;
-        uint256 currentPeriodStart = startTime + (periodsAfterAccumulation * periodDuration);
+        uint256 periodsAfterAccumulation = currentPeriodNumber -
+            accumulatedPeriods;
+        uint256 currentPeriodStart = startTime +
+            (periodsAfterAccumulation * periodDuration);
         return currentPeriodStart + ((periodDuration * 3) / 4);
     }
 
@@ -660,6 +690,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
     error ZeroAmount();
+    error EcosystemPaused();
 
     /**
      * @notice Initializes the TotemFactory contract
@@ -833,13 +864,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @notice Adds multiple tokens to the whitelist
      * @param _tokens Array of token addresses to whitelist
      */
-    function batchAddToWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
+    function batchAddToWhitelist(
+        address[] calldata _tokens
+    ) external onlyRole(MANAGER) {
         for (uint256 i = 0; i < _tokens.length; i++) {
             if (!hasRole(WHITELISTED, _tokens[i])) {
                 grantRole(WHITELISTED, _tokens[i]);
             }
         }
-        
+
         emit BatchWhitelistUpdated(_tokens, true);
     }
 
@@ -847,13 +880,15 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @notice Removes multiple tokens from the whitelist
      * @param _tokens Array of token addresses to remove from whitelist
      */
-    function batchRemoveFromWhitelist(address[] calldata _tokens) external onlyRole(MANAGER) {
+    function batchRemoveFromWhitelist(
+        address[] calldata _tokens
+    ) external onlyRole(MANAGER) {
         for (uint256 i = 0; i < _tokens.length; i++) {
             if (hasRole(WHITELISTED, _tokens[i])) {
                 revokeRole(WHITELISTED, _tokens[i]);
             }
         }
-        
+
         emit BatchWhitelistUpdated(_tokens, false);
     }
 
@@ -864,7 +899,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function addTokenToWhitelist(address _token) public onlyRole(MANAGER) {
         if (hasRole(WHITELISTED, _token)) revert AlreadyWhitelisted(_token);
         grantRole(WHITELISTED, _token);
-        
+
         address[] memory tokens = new address[](1);
         tokens[0] = _token;
         emit BatchWhitelistUpdated(tokens, true);
@@ -877,7 +912,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function removeTokenFromWhitelist(address _token) public onlyRole(MANAGER) {
         if (!hasRole(WHITELISTED, _token)) revert NotWhitelisted(_token);
         revokeRole(WHITELISTED, _token);
-        
+
         address[] memory tokens = new address[](1);
         tokens[0] = _token;
         emit BatchWhitelistUpdated(tokens, false);
@@ -895,6 +930,16 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      */
     function unpause() public onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     // INTERNAL FUNCTIONS
@@ -982,7 +1027,10 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
  *      adding liquidity to AMM pools, and burning totem tokens
  */
 
-contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable {
+contract TotemTokenDistributor is
+    AccessControlUpgradeable,
+    PausableUpgradeable
+{
     using SafeERC20 for IERC20;
 
     // State variables - Contracts
@@ -1004,6 +1052,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
     address private treasuryAddr; // contract address for revenue in payment tokens
     address private paymentTokenAddr; // address of payment token
     address private uniswapV2RouterAddr; // Uniswap V2 router address
+    address private registryAddr; // address of the AddressRegistry contract
 
     // State variables - Mappings
     mapping(address => address) private priceFeedAddresses; // Mapping from token address to Chainlink price feed address
@@ -1090,6 +1139,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
     error StalePrice(address tokenAddr);
     error LiquidityAdditionFailed();
     error UniswapRouterNotSet();
+    error EcosystemPaused();
 
     /**
      * @notice Initializes the TotemTokenDistributor contract
@@ -1105,6 +1155,7 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
 
         if (_registryAddr == address(0)) revert ZeroAddress();
 
+        registryAddr = _registryAddr;
         AddressRegistry registry = AddressRegistry(_registryAddr);
         mytho = IERC20(registry.getMythoToken());
         treasuryAddr = registry.getMythoTreasury();
@@ -1165,7 +1216,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
      * @param _totemTokenAddr Address of the totem token to buy
      * @param _totemTokenAmount Amount of totem tokens to buy
      */
-    function buy(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
+    function buy(
+        address _totemTokenAddr,
+        uint256 _totemTokenAmount
+    ) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -1231,7 +1285,10 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
      * @param _totemTokenAddr Address of the totem token to sell
      * @param _totemTokenAmount Amount of totem tokens to sell
      */
-    function sell(address _totemTokenAddr, uint256 _totemTokenAmount) external whenNotPaused {
+    function sell(
+        address _totemTokenAddr,
+        uint256 _totemTokenAmount
+    ) external whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -1293,6 +1350,16 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
      */
     function unpause() external onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     /**
@@ -1490,15 +1557,6 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
         address factoryAddr = router.factory();
         IUniswapV2Factory factory_ = IUniswapV2Factory(factoryAddr);
 
-        // Get or create the pair
-        liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
-        if (liquidityToken == address(0)) {
-            liquidityToken = factory_.createPair(
-                _totemTokenAddr,
-                _paymentTokenAddr
-            );
-        }
-
         // Approve tokens for the uni router
         IERC20(_totemTokenAddr).approve(uniswapV2RouterAddr, _totemTokenAmount);
         IERC20(_paymentTokenAddr).approve(
@@ -1512,11 +1570,13 @@ contract TotemTokenDistributor is AccessControlUpgradeable, PausableUpgradeable 
             _paymentTokenAddr,
             _totemTokenAmount,
             _paymentTokenAmount,
-            (_totemTokenAmount * 995) / 1000, // 0.5% slippage
-            (_paymentTokenAmount * 995) / 1000, // 0.5% slippage
+            (_totemTokenAmount * 950) / 1000, // 5% slippage
+            (_paymentTokenAmount * 950) / 1000, // 5% slippage
             address(this),
             block.timestamp + 600 // Deadline: 10 minutes from now
         );
+
+        liquidityToken = factory_.getPair(_totemTokenAddr, _paymentTokenAddr);
 
         if (liquidity == 0) revert LiquidityAdditionFailed();
 
@@ -1742,8 +1802,8 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
     event SalePeriodEnded();
 
     // Custom errors
-    error InvalidAddress(); 
-    error NotAllowedInSalePeriod();    
+    error InvalidAddress();
+    error NotAllowedInSalePeriod();
     error OnlyForDistributor();
     error SalePeriodAlreadyEnded();
 
@@ -1754,7 +1814,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
      * @param _totemDistributor The address of the token distributor
      */
     constructor(
-        string memory _name, 
+        string memory _name,
         string memory _symbol,
         address _totemDistributor
     ) ERC20(_name, _symbol) ERC20Permit(_name) {
@@ -1764,7 +1824,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
 
         // Mint all tokens at once and assign them to the distributor
         _mint(_totemDistributor, 1_000_000_000 ether);
-        
+
         // Enable sale period
         salePeriod = true;
     }
@@ -1812,7 +1872,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         if (salePeriod && msg.sender != totemDistributor) {
             revert NotAllowedInSalePeriod();
         }
-        
+
         super._update(_from, _to, _value);
     }
 }
@@ -1882,12 +1942,16 @@ contract Totem is AccessControlUpgradeable {
     error ZeroCirculatingSupply();
     error InvalidParams();
     error TotemsPaused();
+    error EcosystemPaused();
 
     /**
-     * @notice Modifier to check if Totems are paused in the AddressRegistry
+     * @notice Modifier to check if Totems are paused or if the ecosystem is paused in the AddressRegistry
      */
     modifier whenNotPaused() {
-        if (AddressRegistry(registryAddr).areTotemsPaused()) revert TotemsPaused();
+        if (AddressRegistry(registryAddr).areTotemsPaused())
+            revert TotemsPaused();
+        if (AddressRegistry(registryAddr).isEcosystemPaused())
+            revert EcosystemPaused();
         _;
     }
 
@@ -2175,33 +2239,42 @@ contract Totem is AccessControlUpgradeable {
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Upgradeable} from "@openzeppelin-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
+import {ERC20PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {AddressRegistry} from "./AddressRegistry.sol";
 
 /**
- * @title MYTHO Government Token
+ * @title MYTHO Government Token (Upgradeable)
  */
-contract MYTHO is ERC20 {
-    using SafeERC20 for ERC20;    
+contract MYTHO is
+    Initializable,
+    ERC20Upgradeable,
+    ERC20PausableUpgradeable,
+    OwnableUpgradeable
+{
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     // Token distribution
-    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18; // 1 billion tokens with 18 decimals
-    
+    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
+
     // Totem incentives distribution (50% of total supply)
-    uint256 public constant MERIT_YEAR_1 = 175_000_000 * 10**18; // 35% of incentives
-    uint256 public constant MERIT_YEAR_2 = 125_000_000 * 10**18; // 25% of incentives
-    uint256 public constant MERIT_YEAR_3 = 100_000_000 * 10**18; // 20% of incentives
-    uint256 public constant MERIT_YEAR_4 = 50_000_000 * 10**18;  // 10% of incentives
-    
+    uint256 public constant MERIT_YEAR_1 = 200_000_000 * 10 ** 18; // 40% of incentives
+    uint256 public constant MERIT_YEAR_2 = 150_000_000 * 10 ** 18; // 30% of incentives
+    uint256 public constant MERIT_YEAR_3 = 100_000_000 * 10 ** 18; // 20% of incentives
+    uint256 public constant MERIT_YEAR_4 = 50_000_000 * 10 ** 18; // 10% of incentives
+
     // Team allocation (20% of total supply)
-    uint256 public constant TEAM_ALLOCATION = 200_000_000 * 10**18;
-    
+    uint256 public constant TEAM_ALLOCATION = 200_000_000 * 10 ** 18;
+
     // Treasury allocation (23% of total supply - includes previous airdrop allocation)
-    uint256 public constant TREASURY_ALLOCATION = 230_000_000 * 10**18;
-    
+    uint256 public constant TREASURY_ALLOCATION = 230_000_000 * 10 ** 18;
+
     // Mytho AMM incentives (7% of total supply)
-    uint256 public constant AMM_INCENTIVES = 70_000_000 * 10**18;
+    uint256 public constant AMM_INCENTIVES = 70_000_000 * 10 ** 18;
 
     // Vesting duration
     uint64 public constant ONE_YEAR = 12 * 30 days;
@@ -2209,57 +2282,105 @@ contract MYTHO is ERC20 {
     uint64 public constant FOUR_YEARS = 4 * ONE_YEAR;
 
     // Vesting wallet and recipient addresses
-    address public immutable meritVestingYear1;
-    address public immutable meritVestingYear2;
-    address public immutable meritVestingYear3;
-    address public immutable meritVestingYear4;
-    address public immutable teamVesting;
-    address public immutable ammVesting;
-    address public immutable treasury;
+    address public meritVestingYear1;
+    address public meritVestingYear2;
+    address public meritVestingYear3;
+    address public meritVestingYear4;
+    address public teamVesting;
+    address public ammVesting;
+    address public treasury;
+
+    // Registry address
+    address public registryAddr;
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
-    error OnlyOwnerCanBurn();
     error InvalidAmount(uint256 amount);
+    error EcosystemPaused();
 
-    /**
-     * @param _meritManager Address to receive totem incentives
-     * @param _teamReceiver Address to receive team allocation
-     * @param _treasuryReceiver Address to receive treasury allocation
-     * @param _ammReceiver Address to receive AMM incentives
-     */
-    constructor(
-        address _meritManager,
-        address _teamReceiver,
-        address _treasuryReceiver,
-        address _ammReceiver
-    ) ERC20("MYTHO Government Token", "MYTHO") {
-        if (_meritManager == address(0)) revert ZeroAddressNotAllowed("totem receiver");
-        if (_teamReceiver == address(0)) revert ZeroAddressNotAllowed("team receiver");
-        if (_treasuryReceiver == address(0)) revert ZeroAddressNotAllowed("treasury receiver");
-        if (_ammReceiver == address(0)) revert ZeroAddressNotAllowed("AMM receiver");
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+/**
+ * @notice Initializes the MYTHO token contract
+ * @param _meritManager Address to receive totem incentives
+ * @param _teamReceiver Address to receive team allocation
+ * @param _treasuryReceiver Address to receive treasury allocation
+ * @param _ammReceiver Address to receive AMM incentives
+ * @param _registryAddr Address of the registry contract
+ */
+function initialize(
+    address _meritManager,
+    address _teamReceiver,
+    address _treasuryReceiver,
+    address _ammReceiver,
+    address _registryAddr
+) public initializer {
+        __ERC20_init("MYTHO Government Token", "MYTHO");
+        __ERC20Pausable_init();
+        __Ownable_init(msg.sender);
+
+        if (_meritManager == address(0))
+            revert ZeroAddressNotAllowed("totem receiver");
+        if (_teamReceiver == address(0))
+            revert ZeroAddressNotAllowed("team receiver");
+        if (_treasuryReceiver == address(0))
+            revert ZeroAddressNotAllowed("treasury receiver");
+        if (_ammReceiver == address(0))
+            revert ZeroAddressNotAllowed("AMM receiver");
+        if (_registryAddr == address(0))
+            revert ZeroAddressNotAllowed("registry");
 
         // Set the start timestamp for vesting
         uint64 startTimestamp = uint64(block.timestamp);
-        
+
         // Create vesting wallets for totem incentives (4 years)
-        meritVestingYear1 = address(new VestingWallet(_meritManager, startTimestamp, ONE_YEAR));
-        meritVestingYear2 = address(new VestingWallet(_meritManager, startTimestamp + ONE_YEAR, ONE_YEAR));
-        meritVestingYear3 = address(new VestingWallet(_meritManager, startTimestamp + 2 * ONE_YEAR, ONE_YEAR));
-        meritVestingYear4 = address(new VestingWallet(_meritManager, startTimestamp + 3 * ONE_YEAR, ONE_YEAR));
-        
+        meritVestingYear1 = address(
+            new VestingWallet(_meritManager, startTimestamp, ONE_YEAR)
+        );
+        meritVestingYear2 = address(
+            new VestingWallet(
+                _meritManager,
+                startTimestamp + ONE_YEAR,
+                ONE_YEAR
+            )
+        );
+        meritVestingYear3 = address(
+            new VestingWallet(
+                _meritManager,
+                startTimestamp + 2 * ONE_YEAR,
+                ONE_YEAR
+            )
+        );
+        meritVestingYear4 = address(
+            new VestingWallet(
+                _meritManager,
+                startTimestamp + 3 * ONE_YEAR,
+                ONE_YEAR
+            )
+        );
+
         // Create vesting wallet for team (2 years)
-        teamVesting = address(new VestingWallet(_teamReceiver, startTimestamp, TWO_YEARS));
-        
+        teamVesting = address(
+            new VestingWallet(_teamReceiver, startTimestamp, TWO_YEARS)
+        );
+
         // Create vesting wallet for AMM incentives (2 years)
-        ammVesting = address(new VestingWallet(_ammReceiver, startTimestamp, TWO_YEARS));
-        
+        ammVesting = address(
+            new VestingWallet(_ammReceiver, startTimestamp, TWO_YEARS)
+        );
+
         // Treasury (no vesting, immediate access)
         treasury = _treasuryReceiver;
+        
+        // Set registry address
+        registryAddr = _registryAddr;
 
         // Mint the total supply of tokens
         _mint(address(this), TOTAL_SUPPLY);
-        
+
         // Distribute tokens to vesting wallets and addresses
         _transfer(address(this), meritVestingYear1, MERIT_YEAR_1);
         _transfer(address(this), meritVestingYear2, MERIT_YEAR_2);
@@ -2270,21 +2391,46 @@ contract MYTHO is ERC20 {
         _transfer(address(this), treasury, TREASURY_ALLOCATION);
     }
 
-    // EXTERNAL FUNCTIONS
+    // ADMIN FUNCTIONS
+    
+    /**
+     * @notice Pauses all token transfers
+     */
+    function pause() public onlyOwner {
+        _pause();
+    }
 
     /**
-     * @notice Burns tokens from the caller's address
-     *      Can only be called by the token owner
-     * @param _account Address from which tokens are burned
-     * @param _amount Amount of tokens to burn
+     * @notice Unpauses all token transfers
      */
-    function burn(
-        address _account,
-        uint256 _amount
-    ) external {
-        if (msg.sender != _account) revert OnlyOwnerCanBurn();
-        if (_amount == 0) revert InvalidAmount(0);
-        _burn(_account, _amount);
+    function unpause() public onlyOwner {
+        _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (registryAddr != address(0) && AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
+    }
+
+    // INTERNAL FUNCTIONS
+
+    /**
+     * @notice Internal function to update token balances
+     * @param from The address to transfer from
+     * @param to The address to transfer to
+     * @param value The amount to transfer
+     */
+    function _update(
+        address from,
+        address to,
+        uint256 value
+    ) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) {
+        super._update(from, to, value);
     }
 }
 

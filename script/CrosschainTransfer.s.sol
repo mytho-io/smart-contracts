@@ -7,18 +7,19 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {IERC20} from "lib/ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
 
-import { IRouterClient } from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
-import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
-import { CCIPReceiver } from "@chainlink/contracts-ccip/src/v0.8/ccip/applications/CCIPReceiver.sol";
+import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import {CCIPReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/applications/CCIPReceiver.sol";
 
-import { IAny2EVMMessageReceiver } from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IAny2EVMMessageReceiver.sol";
+import {IAny2EVMMessageReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IAny2EVMMessageReceiver.sol";
 
 import {MYTHO} from "../src/MYTHO.sol";
+import {BurnMintMYTHO} from "../src/BurnMintMYTHO.sol";
 
 /// @notice MYTHO crosschain transfer
 contract CrosschainTransfer is Script {
     MYTHO mythoSoneium;
-    MYTHO mythoAstar;
+    BurnMintMYTHO mythoAstar;
 
     address linkAddrSoneium;
     address linkAddrEthereum;
@@ -49,8 +50,8 @@ contract CrosschainTransfer is Script {
         deployer = vm.addr(deployerPk);
 
         // mytho on both chains astar and soneium
-        mythoSoneium = MYTHO(0x197dB89FBbad7C0D23feA80539c20F2F05Ca694F);
-        mythoAstar = MYTHO(0xCFA795310bD2b2bf0E50fc50D3559B4aD591b74E);
+        mythoSoneium = MYTHO(0x00279E93880f463Deb2Ce10773f12d3893554141);
+        mythoAstar = BurnMintMYTHO(0x3A7651a5D19E0aab37F455aAd43b9E182d80014D);
 
         // astar
         wastrCLAddr = 0x37795FdD8C165CaB4D6c05771D564d80439CD093;
@@ -67,27 +68,30 @@ contract CrosschainTransfer is Script {
     }
 
     function run() public {
-        fork(soneium);
+        // fork(soneium);
 
-        console.log(mythoSoneium.balanceOf(deployer));
-        console.log(mythoSoneium.totalSupply());
+        // console.log(mythoSoneium.balanceOf(deployer));
+        // console.log(mythoSoneium.totalSupply());
 
         fork(astar);
 
         console.log(mythoAstar.balanceOf(deployer));
         console.log(mythoAstar.totalSupply());
+
+        _send(address(mythoAstar), 1 ether);
     }
 
-    function send() public {
+    function _send(address _tokenToSend, uint256 _amount) internal {
         bytes memory data = abi.encode("");
 
         Client.EVMTokenAmount[] memory tokens = new Client.EVMTokenAmount[](1);
-        tokens[0] = Client.EVMTokenAmount(address(mythoSoneium), 10 ether);
+        tokens[0] = Client.EVMTokenAmount(_tokenToSend, _amount);
 
-        _ccipSend(tokens, data);
+        // _ccipSendSoneiumAstar(tokens, data);
+        _ccipSendAstarSoneium(tokens, data);
     }
 
-    function _ccipSend(
+    function _ccipSendSoneiumAstar(
         Client.EVMTokenAmount[] memory tokens,
         bytes memory _data
     ) internal {
@@ -96,23 +100,69 @@ contract CrosschainTransfer is Script {
             receiver: abi.encode(deployer),
             data: _data,
             tokenAmounts: tokens,
-            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 2_000_000})),
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: 2_000_000})
+            ),
             feeToken: address(0)
         });
 
         // approve tokens for router if there is a need to send it
         if (tokens.length > 0) {
             for (uint256 i; i < tokens.length; i++) {
-                IERC20(tokens[i].token).approve(ccipRouterSoneium, tokens[i].amount);
-            }            
+                IERC20(tokens[i].token).approve(
+                    ccipRouterSoneium,
+                    tokens[i].amount
+                );
+            }
         }
 
-        uint256 fee = IRouterClient(ccipRouterSoneium).getFee(astarChainSelector, message);
+        uint256 fee = IRouterClient(ccipRouterSoneium).getFee(
+            astarChainSelector,
+            message
+        );
 
         // IERC20(wethSoneium).approve(address(ccipRouterSoneium), fee);
 
         IRouterClient(ccipRouterSoneium).ccipSend{value: fee}(
             astarChainSelector,
+            message
+        );
+    }
+
+    function _ccipSendAstarSoneium(
+        Client.EVMTokenAmount[] memory tokens,
+        bytes memory _data
+    ) internal {
+        // set message data
+        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
+            receiver: abi.encode(deployer),
+            data: _data,
+            tokenAmounts: tokens,
+            extraArgs: Client._argsToBytes(
+                Client.EVMExtraArgsV1({gasLimit: 2_500_000})
+            ),
+            feeToken: address(0)
+        });
+
+        // approve tokens for router if there is a need to send it
+        if (tokens.length > 0) {
+            for (uint256 i; i < tokens.length; i++) {
+                IERC20(tokens[i].token).approve(
+                    ccipRouterAstar,
+                    tokens[i].amount
+                );
+            }
+        }
+
+        uint256 fee = IRouterClient(ccipRouterAstar).getFee(
+            soneiumChainSelector,
+            message
+        );
+
+        // IERC20(wastrCLAddr).approve(address(ccipRouterAstar), fee);
+
+        IRouterClient(ccipRouterAstar).ccipSend{value: fee}(
+            soneiumChainSelector,
             message
         );
     }
@@ -124,7 +174,7 @@ contract CrosschainTransfer is Script {
     }
 }
 
-//   Soneium pool deployed at: 0xc071B8E36B6bC20990951848Ee9997bAEFb07113
-//   Soneium MYTHO deployed at: 0x197dB89FBbad7C0D23feA80539c20F2F05Ca694F
-//   Astar pool deployed at: 0x893855bd21519CA7c321BEB1cdd493473dF0582e
-//   Astar MYTHO deployed at: 0xCFA795310bD2b2bf0E50fc50D3559B4aD591b74E
+// address poolSoneium = 0x70dBD7ed5A30469a48E9e55e4AA63b1a0E6ffBe7;
+// address mythoSoneium = 0x00279E93880f463Deb2Ce10773f12d3893554141;
+// address poolAstar = 0xc85A7CC52df962d4E30854F9cE7ee74F9F428d9C;
+// address mythoAstar = 0x3A7651a5D19E0aab37F455aAd43b9E182d80014D;
