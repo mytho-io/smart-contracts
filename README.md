@@ -1,4 +1,9 @@
-<h1><img src="logo.png" alt="MYTHO Logo" width="40" height="40" style="vertical-align: text-bottom; margin-right: 5px;">MYTHO Ecosystem</h1>
+<table>
+  <tr>
+    <td><img src="logo.png" alt="MYTHO Logo" width="40" height="40"></td>
+    <td><h1>MYTHO Ecosystem</h1></td>
+  </tr>
+</table>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Solidity Version](https://img.shields.io/badge/Solidity-^0.8.28-brightgreen.svg)](https://soliditylang.org/)
