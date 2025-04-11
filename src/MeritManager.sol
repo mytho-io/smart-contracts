@@ -84,7 +84,6 @@ contract MeritManager is
     error NoMythoToClaim();
     error AlreadyClaimed(uint256 period);
     error InvalidPeriod();
-    error TransferFailed();
     error InvalidAddress();
     error InsufficientTotemBalance();
     error InvalidPeriodDuration();
@@ -469,8 +468,33 @@ contract MeritManager is
     }
 
     /**
-     * @notice Gets all registered totems
-     * @return Array of registered totem addresses
+     * @notice Gets registered totems within specified boundaries
+     * @param _start The starting index (inclusive)
+     * @param _end The ending index (exclusive)
+     * @return Array of registered totem addresses within the specified range
+     */
+    function getAllRegisteredTotems(uint256 _start, uint256 _end) external view returns (address[] memory) {
+        if (_end > registeredTotemsList.length) {
+            _end = registeredTotemsList.length;
+        }
+        if (_start >= _end) {
+            return new address[](0);
+        }
+
+        uint256 length = _end - _start;
+        address[] memory result = new address[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            result[i] = registeredTotemsList[_start + i];
+        }
+        
+        return result;
+    }
+
+    /**
+     * @notice Gets all registered totems (for backward compatibility)
+     * @return Array of all registered totem addresses
+     * @dev This function may be gas-intensive with a large number of totems
      */
     function getAllRegisteredTotems() external view returns (address[] memory) {
         return registeredTotemsList;
