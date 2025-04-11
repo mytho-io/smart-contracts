@@ -7,6 +7,7 @@ import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {OwnableUpgradeable} from "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {AddressRegistry} from "./AddressRegistry.sol";
 
 /**
  * @title MYTHO Government Token (Upgradeable)
@@ -51,28 +52,34 @@ contract MYTHO is
     address public ammVesting;
     address public treasury;
 
+    // Registry address
+    address public registryAddr;
+
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
     error InvalidAmount(uint256 amount);
+    error EcosystemPaused();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    /**
-     * @notice Initializes the MYTHO token contract
-     * @param _meritManager Address to receive totem incentives
-     * @param _teamReceiver Address to receive team allocation
-     * @param _treasuryReceiver Address to receive treasury allocation
-     * @param _ammReceiver Address to receive AMM incentives
-     */
-    function initialize(
-        address _meritManager,
-        address _teamReceiver,
-        address _treasuryReceiver,
-        address _ammReceiver
-    ) public initializer {
+/**
+ * @notice Initializes the MYTHO token contract
+ * @param _meritManager Address to receive totem incentives
+ * @param _teamReceiver Address to receive team allocation
+ * @param _treasuryReceiver Address to receive treasury allocation
+ * @param _ammReceiver Address to receive AMM incentives
+ * @param _registryAddr Address of the registry contract
+ */
+function initialize(
+    address _meritManager,
+    address _teamReceiver,
+    address _treasuryReceiver,
+    address _ammReceiver,
+    address _registryAddr
+) public initializer {
         __ERC20_init("MYTHO Government Token", "MYTHO");
         __ERC20Pausable_init();
         __Ownable_init(msg.sender);
@@ -85,6 +92,8 @@ contract MYTHO is
             revert ZeroAddressNotAllowed("treasury receiver");
         if (_ammReceiver == address(0))
             revert ZeroAddressNotAllowed("AMM receiver");
+        if (_registryAddr == address(0))
+            revert ZeroAddressNotAllowed("registry");
 
         // Set the start timestamp for vesting
         uint64 startTimestamp = uint64(block.timestamp);
@@ -127,6 +136,9 @@ contract MYTHO is
 
         // Treasury (no vesting, immediate access)
         treasury = _treasuryReceiver;
+        
+        // Set registry address
+        registryAddr = _registryAddr;
 
         // Mint the total supply of tokens
         _mint(address(this), TOTAL_SUPPLY);
@@ -155,6 +167,16 @@ contract MYTHO is
      */
     function unpause() public onlyOwner {
         _unpause();
+    }
+
+    /**
+     * @dev Throws if the contract is paused or if the ecosystem is paused.
+     */
+    function _requireNotPaused() internal view virtual override {
+        super._requireNotPaused();
+        if (registryAddr != address(0) && AddressRegistry(registryAddr).isEcosystemPaused()) {
+            revert EcosystemPaused();
+        }
     }
 
     // INTERNAL FUNCTIONS
