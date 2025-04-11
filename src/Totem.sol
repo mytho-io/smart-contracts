@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -15,7 +16,7 @@ import {TotemToken} from "./TotemToken.sol";
  * @notice This contract represents a Totem in the MYTHO ecosystem, managing token burning and merit distribution
  *      Handles the lifecycle of a Totem, including token burning after sale period and merit distribution
  */
-contract Totem is AccessControlUpgradeable {
+contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
     using SafeERC20 for TotemToken;
 
@@ -101,6 +102,7 @@ contract Totem is AccessControlUpgradeable {
         ) revert InvalidParams();
 
         __AccessControl_init();
+        __ReentrancyGuard_init();
 
         totemToken = _totemToken;
         dataHash = _dataHash;
@@ -136,7 +138,7 @@ contract Totem is AccessControlUpgradeable {
      *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens based on circulating supply.
      * @param _totemTokenAmount The amount of TotemToken to burn or transfer
      */
-    function burnTotemTokens(uint256 _totemTokenAmount) external whenNotPaused {
+    function burnTotemTokens(uint256 _totemTokenAmount) external nonReentrant whenNotPaused {
         if (!isCustomToken && !salePeriodEnded) revert SalePeriodNotEnded();
         if (totemToken.balanceOf(msg.sender) < _totemTokenAmount)
             revert InsufficientTotemBalance();
