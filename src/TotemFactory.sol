@@ -5,9 +5,9 @@ import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/acce
 import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
-import {Totem} from "./Totem.sol";
 import {TotemToken} from "./TotemToken.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
@@ -18,6 +18,8 @@ import {AddressRegistry} from "./AddressRegistry.sol";
  *      Handles creation of new Totems with either new or existing tokens
  */
 contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
+    using SafeERC20 for IERC20;
+
     // State variables - Contracts
     TotemTokenDistributor private totemDistributor;
 
@@ -66,12 +68,9 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     // Custom errors
     error AlreadyWhitelisted(address totemTokenAddr);
     error NotWhitelisted(address totemTokenAddr);
-    error InsufficientFee(uint256 provided, uint256 required);
-    error FeeTransferFailed();
     error ZeroAddress();
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
-    error ZeroAmount();
     error EcosystemPaused();
 
     /**
@@ -335,13 +334,11 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         // Skip fee collection if fee is set to zero
         if (creationFee == 0) return;
 
-        // Transfer tokens from sender to fee collector
-        bool success = IERC20(feeTokenAddr).transferFrom(
+        IERC20(feeTokenAddr).safeTransferFrom(
             _sender,
             treasuryAddr,
             creationFee
         );
-        if (!success) revert FeeTransferFailed();
     }
 
     // VIEW FUNCTIONS
