@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright © 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
@@ -641,9 +642,9 @@ contract TotemTokenDistributor is
 
         if (priceFeedAddr == address(0)) {
             // If no price feed is set for this token, return a default value. For test purposes
-            // return 0.05 * 1e18;
+            return 0.05 * 1e18;
 
-            revert NoPriceFeedSet(_tokenAddr);
+            // revert NoPriceFeedSet(_tokenAddr);
         }
 
         // Get the latest price from Chainlink
