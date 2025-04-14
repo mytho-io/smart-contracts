@@ -1,11 +1,6 @@
-<table>
-  <tr>
-    <td><img src="logo.png" alt="MYTHO Logo" width="40" height="40"></td>
-    <td><h1>MYTHO Ecosystem</h1></td>
-  </tr>
-</table>
+# MYTHO Ecosystem
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](https://spdx.org/licenses/BUSL-1.1.html)
 [![Solidity Version](https://img.shields.io/badge/Solidity-^0.8.28-brightgreen.svg)](https://soliditylang.org/)
 [![Tests](https://img.shields.io/badge/Tests-Foundry-orange.svg)](https://book.getfoundry.sh/)
 
@@ -220,4 +215,14 @@ For detailed steps, refer to the `MythoCcipSetup.s.sol` script.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Business Source License 1.1 (BUSL-1.1) - see the [LICENSE](LICENSE) file for details.
+
+### License Summary
+
+- **License Type**: Business Source License 1.1 (BUSL-1.1)
+- **Copyright**: © 2025 Mytho. All Rights Reserved.
+- **Change Date**: May 1, 2027
+- **Change License**: MIT License
+- **Additional Use Grant**: None
+
+The BUSL-1.1 license allows for non-production use of the code until the Change Date (May 1, 2027), after which the code will be available under the MIT License. For production use before the Change Date, please contact igporoshin@gmail.com to obtain a commercial license.
