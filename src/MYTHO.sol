@@ -65,21 +65,21 @@ contract MYTHO is
         _disableInitializers();
     }
 
-/**
- * @notice Initializes the MYTHO token contract
- * @param _meritManager Address to receive totem incentives
- * @param _teamReceiver Address to receive team allocation
- * @param _treasuryReceiver Address to receive treasury allocation
- * @param _ammReceiver Address to receive AMM incentives
- * @param _registryAddr Address of the registry contract
- */
-function initialize(
-    address _meritManager,
-    address _teamReceiver,
-    address _treasuryReceiver,
-    address _ammReceiver,
-    address _registryAddr
-) public initializer {
+    /**
+     * @notice Initializes the MYTHO token contract
+     * @param _meritManager Address to receive totem incentives
+     * @param _teamReceiver Address to receive team allocation
+     * @param _treasuryReceiver Address to receive treasury allocation
+     * @param _ammReceiver Address to receive AMM incentives
+     * @param _registryAddr Address of the registry contract
+     */
+    function initialize(
+        address _meritManager,
+        address _teamReceiver,
+        address _treasuryReceiver,
+        address _ammReceiver,
+        address _registryAddr
+    ) public initializer {
         __ERC20_init("MYTHO Government Token", "MYTHO");
         __ERC20Pausable_init();
         __Ownable_init(msg.sender);
@@ -136,7 +136,7 @@ function initialize(
 
         // Treasury (no vesting, immediate access)
         treasury = _treasuryReceiver;
-        
+
         // Set registry address
         registryAddr = _registryAddr;
 
@@ -154,7 +154,7 @@ function initialize(
     }
 
     // ADMIN FUNCTIONS
-    
+
     /**
      * @notice Pauses all token transfers
      */
@@ -174,7 +174,10 @@ function initialize(
      */
     function _requireNotPaused() internal view virtual override {
         super._requireNotPaused();
-        if (registryAddr != address(0) && AddressRegistry(registryAddr).isEcosystemPaused()) {
+        if (
+            registryAddr != address(0) &&
+            AddressRegistry(registryAddr).isEcosystemPaused()
+        ) {
             revert EcosystemPaused();
         }
     }
