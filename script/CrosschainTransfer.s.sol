@@ -10,6 +10,8 @@ import {IERC20} from "lib/ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import {CCIPReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/applications/CCIPReceiver.sol";
+import {BurnMintTokenPool} from "@chainlink/contracts-ccip/src/v0.8/ccip/pools/BurnMintTokenPool.sol";
+import {TokenPool} from "@chainlink/contracts-ccip/src/v0.8/ccip/pools/TokenPool.sol";
 
 import {IAny2EVMMessageReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IAny2EVMMessageReceiver.sol";
 
@@ -26,6 +28,7 @@ contract CrosschainTransfer is Script {
 
     address ccipRouterSoneium;
     address ccipRouterAstar;
+    address ccipRouterArbitrum;
 
     address deployer;
 
@@ -33,25 +36,37 @@ contract CrosschainTransfer is Script {
     address wastrAddr;
     address wethSoneium;
 
+    address soneiumPool;
+    address soneiumMytho;
+    address arbitrumPool;
+    address arbitrumMytho;
+
+    address poolAstar;
+
     uint64 astarChainSelector;
     uint64 soneiumChainSelector;
+    uint64 chainSelectorArbitrum;
 
     uint256 soneium;
     uint256 astar;
+    uint256 arbitrum;
 
     uint256 deployerPk = vm.envUint("PRIVATE_KEY");
 
     string SONEIUM_RPC_URL = vm.envString("SONEIUM_RPC_URL");
     string ASTAR_RPC_URL = vm.envString("ASTAR_RPC_URL");
+    string ARBITRUM_RPC_URL = vm.envString("ARBITRUM_RPC_URL");
 
     function setUp() public {
         soneium = vm.createFork(SONEIUM_RPC_URL);
         astar = vm.createFork(ASTAR_RPC_URL);
+        arbitrum = vm.createFork(ARBITRUM_RPC_URL);
         deployer = vm.addr(deployerPk);
 
-        // mytho on both chains astar and soneium
-        mythoSoneium = MYTHO(0x00279E93880f463Deb2Ce10773f12d3893554141);
-        mythoAstar = BurnMintMYTHO(0x3A7651a5D19E0aab37F455aAd43b9E182d80014D);
+        soneiumPool = 0xe2629839031bea8Dd370d109969c5033DcdEb9aA;
+        soneiumMytho = 0x131c5D0cF8F31ab4B202308e4102a667dDA2Fa64;
+        arbitrumPool = 0xC69391950883106321c6BA1EcEC205986245964A;
+        arbitrumMytho = 0xA0A6dBf6A68cDB8A479efBa2f68166914b82c79A;
 
         // astar
         wastrCLAddr = 0x37795FdD8C165CaB4D6c05771D564d80439CD093;
@@ -64,79 +79,63 @@ contract CrosschainTransfer is Script {
         soneiumChainSelector = 12505351618335765396;
         wethSoneium = 0x4200000000000000000000000000000000000006;
 
-        astarChainSelector = 6422105447186081193;
+        // arbitrum
+        ccipRouterArbitrum = 0x141fa059441E0ca23ce184B6A78bafD2A517DdE8;
+        chainSelectorArbitrum = 4949039107694359620;
     }
 
     function run() public {
-        // fork(soneium);
+        fork(soneium);
 
-        // console.log(mythoSoneium.balanceOf(deployer));
-        // console.log(mythoSoneium.totalSupply());
+        console.log(
+            "Soneium MYTHO balance: ",
+            IERC20(soneiumMytho).balanceOf(deployer)
+        );
+        console.log(
+            "Soneium MYTHO total supply: ",
+            IERC20(soneiumMytho).totalSupply()
+        );
 
-        fork(astar);
+        // _send(
+        //     address(soneiumMytho),
+        //     1 ether,
+        //     ccipRouterSoneium,
+        //     chainSelectorArbitrum
+        // );
 
-        console.log(mythoAstar.balanceOf(deployer));
-        console.log(mythoAstar.totalSupply());
+        fork(arbitrum);
 
-        _send(address(mythoAstar), 1 ether);
+        console.log(
+            "Arbitrum MYTHO balance: ",
+            IERC20(arbitrumMytho).balanceOf(deployer)
+        );
+        console.log(
+            "Arbitrum MYTHO total supply: ",
+            IERC20(arbitrumMytho).totalSupply()
+        );
+
+        // _send(
+        //     address(arbitrumMytho),
+        //     0.5 ether,
+        //     ccipRouterArbitrum,
+        //     soneiumChainSelector
+        // );
     }
 
-    function _send(address _tokenToSend, uint256 _amount) internal {
+    function _send(
+        address _tokenToSend, 
+        uint256 _amount,
+        address _localRouter,
+        uint64 _remoteChainSelector
+    ) internal {
         bytes memory data = abi.encode("");
 
         Client.EVMTokenAmount[] memory tokens = new Client.EVMTokenAmount[](1);
         tokens[0] = Client.EVMTokenAmount(_tokenToSend, _amount);
 
-        // _ccipSendSoneiumAstar(tokens, data);
-        _ccipSendAstarSoneium(tokens, data);
-    }
-
-    function _ccipSendSoneiumAstar(
-        Client.EVMTokenAmount[] memory tokens,
-        bytes memory _data
-    ) internal {
-        // set message data
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
             receiver: abi.encode(deployer),
-            data: _data,
-            tokenAmounts: tokens,
-            extraArgs: Client._argsToBytes(
-                Client.EVMExtraArgsV1({gasLimit: 2_000_000})
-            ),
-            feeToken: address(0)
-        });
-
-        // approve tokens for router if there is a need to send it
-        if (tokens.length > 0) {
-            for (uint256 i; i < tokens.length; i++) {
-                IERC20(tokens[i].token).approve(
-                    ccipRouterSoneium,
-                    tokens[i].amount
-                );
-            }
-        }
-
-        uint256 fee = IRouterClient(ccipRouterSoneium).getFee(
-            astarChainSelector,
-            message
-        );
-
-        // IERC20(wethSoneium).approve(address(ccipRouterSoneium), fee);
-
-        IRouterClient(ccipRouterSoneium).ccipSend{value: fee}(
-            astarChainSelector,
-            message
-        );
-    }
-
-    function _ccipSendAstarSoneium(
-        Client.EVMTokenAmount[] memory tokens,
-        bytes memory _data
-    ) internal {
-        // set message data
-        Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
-            receiver: abi.encode(deployer),
-            data: _data,
+            data: data,
             tokenAmounts: tokens,
             extraArgs: Client._argsToBytes(
                 Client.EVMExtraArgsV1({gasLimit: 2_500_000})
@@ -148,21 +147,21 @@ contract CrosschainTransfer is Script {
         if (tokens.length > 0) {
             for (uint256 i; i < tokens.length; i++) {
                 IERC20(tokens[i].token).approve(
-                    ccipRouterAstar,
+                    _localRouter,
                     tokens[i].amount
                 );
             }
         }
 
-        uint256 fee = IRouterClient(ccipRouterAstar).getFee(
-            soneiumChainSelector,
+        uint256 fee = IRouterClient(_localRouter).getFee(
+            _remoteChainSelector,
             message
         );
 
-        // IERC20(wastrCLAddr).approve(address(ccipRouterAstar), fee);
+        // IERC20(wethSoneium).approve(address(_localRouter), fee);
 
-        IRouterClient(ccipRouterAstar).ccipSend{value: fee}(
-            soneiumChainSelector,
+        IRouterClient(_localRouter).ccipSend{value: fee}(
+            _remoteChainSelector,
             message
         );
     }

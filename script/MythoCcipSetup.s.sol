@@ -13,6 +13,7 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 
 import {MYTHO} from "../src/MYTHO.sol";
 import {BurnMintMYTHO} from "../src/BurnMintMYTHO.sol";
+import {AddressRegistry} from "../src/AddressRegistry.sol";
 
 import {IERC20} from "lib/ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
 
@@ -30,204 +31,192 @@ interface ITokenAdminRegistry {
  * @title MYTHO CCIP adjustemts between Soneium and Astar
  */
 contract MythoCcipSetup is Script {
-    LockReleaseTokenPool poolSoneium;
-    BurnMintTokenPool poolAstar;
-    MYTHO mythoSoneium;
-    BurnMintMYTHO mythoAstar;
-    TransparentUpgradeableProxy proxySoneium;
-    TransparentUpgradeableProxy proxyAstar;
-
-    IRegistryModuleOwnerCustom registryModuleOwnerCustomAstar;
-    IRegistryModuleOwnerCustom registryModuleOwnerCustomSoneium;
-
-    ITokenAdminRegistry tokenAdminRegistryAstar;
-    ITokenAdminRegistry tokenAdminRegistrySoneium;
-
     uint64 chainSelectorAstar;
     uint64 chainSelectorSoneium;
+    uint64 chainSelectorArbitrum;
 
     uint256 soneium;
     uint256 astar;
+    uint256 arbitrum;
 
     uint256 deployerPk = vm.envUint("PRIVATE_KEY");
 
     string SONEIUM_RPC_URL = vm.envString("SONEIUM_RPC_URL");
     string ASTAR_RPC_URL = vm.envString("ASTAR_RPC_URL");
+    string ARBITRUM_RPC_URL = vm.envString("ARBITRUM_RPC_URL");
 
     address deployer;
     address manager;
-    address rmnProxySoneium;
-    address rmnProxyAstar;
-    address routerSoneium;
-    address routerAstar;
 
     function setUp() public {
         soneium = vm.createFork(SONEIUM_RPC_URL);
         astar = vm.createFork(ASTAR_RPC_URL);
+        arbitrum = vm.createFork(ARBITRUM_RPC_URL);
+
         deployer = vm.addr(deployerPk);
         manager = 0xf9B9068276163f47cd5599750496c48BeEba7B44;
 
-        rmnProxySoneium = 0x3117f515D763652A32d3D6D447171ea7c9d57218;
-        routerSoneium = 0x8C8B88d827Fe14Df2bc6392947d513C86afD6977;
-        rmnProxyAstar = 0x7317D216F3DCDa40144a54eC9bA09829a423cb35;
-        routerAstar = 0x8D5c5CB8ec58285B424C93436189fB865e437feF;
-
-        registryModuleOwnerCustomAstar = IRegistryModuleOwnerCustom(0x9c54A7E067E5bdB8e1A44eA7a657053780d35d58);
-        tokenAdminRegistryAstar = ITokenAdminRegistry(0xB98eEd70e3cE8E342B0f770589769E3A6bc20A09);
         chainSelectorAstar = 6422105447186081193;
-
-        registryModuleOwnerCustomSoneium = IRegistryModuleOwnerCustom(0x1d0B6B3ef94dD6A68b7E16bd8B01fca9EA8e3d6E);
-        tokenAdminRegistrySoneium = ITokenAdminRegistry(0x5ba21F6824400B91F232952CA6d7c8875C1755a4);
         chainSelectorSoneium = 12505351618335765396;
+        chainSelectorArbitrum = 4949039107694359620;
     } // prettier-ignore
 
     function run() public {
         // do
 
-        // _deployMythoAndPools();
+        // _deployMythoAndPools(
+        //     0x3117f515D763652A32d3D6D447171ea7c9d57218, // _sourceRmnProxy
+        //     0x8C8B88d827Fe14Df2bc6392947d513C86afD6977, // _sourceRouter
+        //     0xC311a21e6fEf769344EB1515588B9d535662a145, // _remoteRmnProxy
+        //     0x141fa059441E0ca23ce184B6A78bafD2A517DdE8 //  _remoteRouter
+        // );
 
-        address poolSoneium = 0x70dBD7ed5A30469a48E9e55e4AA63b1a0E6ffBe7;
-        address mythoSoneium = 0x00279E93880f463Deb2Ce10773f12d3893554141;
-        address poolAstar = 0xc85A7CC52df962d4E30854F9cE7ee74F9F428d9C;
-        address mythoAstar = 0x3A7651a5D19E0aab37F455aAd43b9E182d80014D;
+        address soneiumPool = 0xe2629839031bea8Dd370d109969c5033DcdEb9aA;
+        address soneiumMytho = 0x131c5D0cF8F31ab4B202308e4102a667dDA2Fa64;
+        address arbitrumPool = 0xC69391950883106321c6BA1EcEC205986245964A;
+        address arbitrumMytho = 0xA0A6dBf6A68cDB8A479efBa2f68166914b82c79A;
 
         // fork(soneium);
-        // console.log(IERC20(mythoSoneium).balanceOf(deployer));
-        // console.log(IERC20(mythoSoneium).totalSupply());
+        // console.log(IERC20(soneiumMytho).balanceOf(deployer));
+        // console.log(IERC20(soneiumMytho).totalSupply());
 
-        fork(astar);
-        console.log(IERC20(mythoAstar).balanceOf(deployer));
-        console.log(IERC20(mythoAstar).totalSupply());
+        // fork(arbitrum);
+        // console.log(IERC20(arbitrumMytho).balanceOf(deployer));
+        // console.log(IERC20(arbitrumMytho).totalSupply());
 
-        console.log(BurnMintMYTHO(mythoAstar).isMinter(poolAstar));
-        console.log(BurnMintMYTHO(mythoAstar).isBurner(poolAstar));
+        // console.log(BurnMintMYTHO(arbitrumMytho).isMinter(arbitrumPool));
+        // console.log(BurnMintMYTHO(arbitrumMytho).isBurner(arbitrumPool));
 
         // _grantMintBurnAccess(
-        //     mythoAstar,
-        //     poolAstar
+        //     arbitrumMytho,
+        //     arbitrumPool
         // );
 
-        // _ccipSetUp(
-        //     mythoAstar,
-        //     poolAstar,
-        //     mythoSoneium,
-        //     poolSoneium
-        // );
+        fork(soneium);
+
+        _ccipSetUp(
+            chainSelectorArbitrum, // _remoteChainSelector
+            soneiumPool, // _localPool
+            arbitrumPool, // _remotePool
+            soneiumMytho, // _localToken
+            arbitrumMytho, // _remoteToken
+            0x2c3D51c7B454cB045C8cEc92d2F9E717C7519106, // _registryModuleOwnerCustom
+            0x5ba21F6824400B91F232952CA6d7c8875C1755a4  // _tokenAdminRegistry
+        );
+
+        fork(arbitrum);
+
+        _ccipSetUp(
+            chainSelectorSoneium, // _remoteChainSelector
+            arbitrumPool, // _localPool
+            soneiumPool, // _remotePool
+            arbitrumMytho, // _localToken
+            soneiumMytho, // _remoteToken
+            0x1f1df9f7fc939E71819F766978d8F900B816761b, // _registryModuleOwnerCustom
+            0x39AE1032cF4B334a1Ed41cdD0833bdD7c7E7751E  // _tokenAdminRegistry
+        );
     }
 
-    function _deployMythoAndPools() internal {
-        // fork(soneium);
+    function _deployMythoAndPools(
+        address _sourceRmnProxy,
+        address _sourceRouter,
+        address _remoteRmnProxy,
+        address _remoteRouter
+    ) internal {
+        fork(soneium);
 
-        // MYTHO mythoSoneiumImpl = new MYTHO();
-        // proxySoneium = new TransparentUpgradeableProxy(
-        //     address(mythoSoneiumImpl),
-        //     deployer,
-        //     ""
-        // );
-        // mythoSoneium = MYTHO(address(proxySoneium));
-        // mythoSoneium.initialize(deployer, deployer, deployer, deployer);
-
-        // poolSoneium = new LockReleaseTokenPool(
-        //     IERC20(address(mythoSoneium)), // token
-        //     new address[](0), // allowlist
-        //     rmnProxySoneium, // rmnProxy
-        //     false, // acceptLiquidity
-        //     routerSoneium // router
-        // );
-
-        // console.log("Soneium pool deployed at: %s", address(poolSoneium));
-        // console.log("Soneium MYTHO deployed at: %s", address(mythoSoneium));
-
-        fork(astar);
-
-        BurnMintMYTHO mythoAstarImpl = new BurnMintMYTHO();
-        proxyAstar = new TransparentUpgradeableProxy(
-            address(mythoAstarImpl),
+        AddressRegistry registryImpl = new AddressRegistry();
+        TransparentUpgradeableProxy registryProxy = new TransparentUpgradeableProxy(
+            address(registryImpl),
             deployer,
             ""
         );
-        mythoAstar = BurnMintMYTHO(address(proxyAstar));
-        mythoAstar.initialize();
+        AddressRegistry registry = AddressRegistry(address(registryProxy));
+        registry.initialize();
 
-        poolAstar = new BurnMintTokenPool(
-            IBurnMintERC20(address(mythoAstar)),
-            new address[](0),
-            rmnProxyAstar,
-            routerAstar
+        MYTHO sourceMythoImpl = new MYTHO();
+        TransparentUpgradeableProxy sourceProxy = new TransparentUpgradeableProxy(
+            address(sourceMythoImpl),
+            deployer,
+            ""
+        );
+        MYTHO sourceToken = MYTHO(address(sourceProxy));
+        sourceToken.initialize(deployer, deployer, deployer, deployer, address(registry));
+
+        LockReleaseTokenPool sourcePool = new LockReleaseTokenPool(
+            IERC20(address(sourceToken)), // token
+            new address[](0), // allowlist
+            _sourceRmnProxy, // rmnProxy
+            false, // acceptLiquidity
+            _sourceRouter // router
         );
 
-        console.log("Astar pool deployed at: %s", address(poolAstar));
-        console.log("Astar MYTHO deployed at: %s", address(mythoAstar));
+        console.log("Source pool deployed at: %s", address(sourcePool));
+        console.log("Source MYTHO deployed at: %s", address(sourceToken));
+
+        fork(arbitrum);
+
+        BurnMintMYTHO remoteMythoImpl = new BurnMintMYTHO();
+        TransparentUpgradeableProxy remoteProxy = new TransparentUpgradeableProxy(
+            address(remoteMythoImpl),
+            deployer,
+            ""
+        );
+        BurnMintMYTHO remoteToken = BurnMintMYTHO(address(remoteProxy));
+        remoteToken.initialize();
+
+        BurnMintTokenPool remotePool = new BurnMintTokenPool(
+            IBurnMintERC20(address(remoteToken)),
+            new address[](0),
+            _remoteRmnProxy,
+            _remoteRouter
+        );
+
+        console.log("Remote pool deployed at: %s", address(remotePool));
+        console.log("Remote MYTHO deployed at: %s", address(remoteToken));
     }
 
     function _grantMintBurnAccess(
-        address _mythoAstar,
-        address _poolAstar
+        address _localToken,
+        address _localPool
     ) internal {
-        fork(astar);
-
-        BurnMintMYTHO(_mythoAstar).grantMintAccess(_poolAstar);
-        BurnMintMYTHO(_mythoAstar).grantBurnAccess(_poolAstar);
+        BurnMintMYTHO(_localToken).grantMintAccess(_localPool);
+        BurnMintMYTHO(_localToken).grantBurnAccess(_localPool);
     }
 
     function _ccipSetUp(
-        address _mythoAstar,
-        address _poolAstar,
-        address _mythoSoneium,
-        address _poolSoneium
+        uint64 _remoteChainSelector,
+        address _localPool,
+        address _remotePool,
+        address _localToken,
+        address _remoteToken,
+        address _registryModuleOwnerCustom,
+        address _tokenAdminRegistry
     ) internal {
-        // fork(soneium);
-
-        // TokenPool.ChainUpdate[]
-        //     memory chainUpdatesSoneium = new TokenPool.ChainUpdate[](1);
-        // chainUpdatesSoneium[0] = TokenPool.ChainUpdate({
-        //     remoteChainSelector: chainSelectorAstar, // astar's selector
-        //     allowed: true,
-        //     remotePoolAddress: abi.encode(address(_poolAstar)),
-        //     remoteTokenAddress: abi.encode(address(_mythoAstar)),
-        //     outboundRateLimiterConfig: RateLimiter.Config(false, 0, 0),
-        //     inboundRateLimiterConfig: RateLimiter.Config(false, 0, 0)
-        // });
-
-        // registryModuleOwnerCustomSoneium.registerAdminViaOwner(
-        //     address(_mythoSoneium)
-        // );
-        // tokenAdminRegistrySoneium.acceptAdminRole(address(_mythoSoneium));
-        // tokenAdminRegistrySoneium.setPool(
-        //     address(_mythoSoneium),
-        //     address(_poolSoneium)
-        // );
-        // LockReleaseTokenPool(_poolSoneium).applyChainUpdates(
-        //     chainUpdatesSoneium
-        // );
-        // LockReleaseTokenPool(_poolSoneium).setRemotePool(
-        //     chainSelectorAstar,
-        //     abi.encode(address(_poolAstar))
-        // );
-
-        fork(astar);
-
         TokenPool.ChainUpdate[]
-            memory chainUpdatesSoneium = new TokenPool.ChainUpdate[](1);
-        chainUpdatesSoneium[0] = TokenPool.ChainUpdate({
-            remoteChainSelector: chainSelectorSoneium,
+            memory chainUpdates = new TokenPool.ChainUpdate[](1);
+        chainUpdates[0] = TokenPool.ChainUpdate({
+            remoteChainSelector: _remoteChainSelector,
             allowed: true,
-            remotePoolAddress: abi.encode(address(_poolSoneium)),
-            remoteTokenAddress: abi.encode(address(_mythoSoneium)),
+            remotePoolAddress: abi.encode(_remotePool),
+            remoteTokenAddress: abi.encode(_remoteToken),
             outboundRateLimiterConfig: RateLimiter.Config(false, 0, 0),
             inboundRateLimiterConfig: RateLimiter.Config(false, 0, 0)
         });
 
-        registryModuleOwnerCustomAstar.registerAdminViaOwner(address(_mythoAstar));
-        tokenAdminRegistryAstar.acceptAdminRole(address(_mythoAstar));
-        tokenAdminRegistryAstar.setPool(
-            address(_mythoAstar),
-            address(_poolAstar)
+        IRegistryModuleOwnerCustom(_registryModuleOwnerCustom)
+            .registerAdminViaOwner(_localToken);
+        ITokenAdminRegistry(_tokenAdminRegistry).acceptAdminRole(
+            _localToken
         );
-        BurnMintTokenPool(_poolAstar).applyChainUpdates(chainUpdatesSoneium);
-        BurnMintTokenPool(_poolAstar).setRemotePool(
-            chainSelectorSoneium,
-            abi.encode(address(_poolSoneium))
+        ITokenAdminRegistry(_tokenAdminRegistry).setPool(
+            _localToken,
+            _localPool
+        );
+        BurnMintTokenPool(_localPool).applyChainUpdates(chainUpdates);
+        BurnMintTokenPool(_localPool).setRemotePool(
+            _remoteChainSelector,
+            abi.encode(_remotePool)
         );
     }
 
@@ -238,7 +227,8 @@ contract MythoCcipSetup is Script {
     }
 }
 
-//   Soneium pool deployed at: 0x70dBD7ed5A30469a48E9e55e4AA63b1a0E6ffBe7
-//   Soneium MYTHO deployed at: 0x00279E93880f463Deb2Ce10773f12d3893554141
-//   Astar pool deployed at: 0xc85A7CC52df962d4E30854F9cE7ee74F9F428d9C
-//   Astar MYTHO deployed at: 0x3A7651a5D19E0aab37F455aAd43b9E182d80014D
+// == Logs ==
+//   Soneium pool deployed at: 0xe2629839031bea8Dd370d109969c5033DcdEb9aA
+//   Soneium MYTHO deployed at: 0x131c5D0cF8F31ab4B202308e4102a667dDA2Fa64
+//   Arbitrum pool deployed at: 0xC69391950883106321c6BA1EcEC205986245964A
+//   Arbitrum MYTHO deployed at: 0xA0A6dBf6A68cDB8A479efBa2f68166914b82c79A
