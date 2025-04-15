@@ -76,13 +76,13 @@ contract Do is Script {
         user = 0xf9B9068276163f47cd5599750496c48BeEba7B44;
 
         // Deployed contracts
-        beacon = UpgradeableBeacon(0x6b240c09059A5DAE4ce8716F10726A06c82eED63);
-        factory = TF(0x6a89EdDE5D7a3C8Ec5103f7dB4Be2587660420D6);
-        mm = MM(0xe2629839031bea8Dd370d109969c5033DcdEb9aA);
-        distr = TTD(0x891561D42158d12fAeCE264b1d312d1FD7EdBDF4);
-        treasury = Treasury(payable(0x8006aa62c46Fc731f3B1389AA0fF0d3f07d4d7f5));
-        registry = AddressRegistry(0x5FFA0E0302E28f937B705D5e3CF7FbA453CD3eC0);
-        mytho = MYTHO(0x3e75e4991E4DeEcC2338577A125A560c490d6Da7);
+        beacon = UpgradeableBeacon(0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec);
+        factory = TF(0xF0a09aC7a2242977566c8F8dF4F944ed7D333047);
+        mm = MM(0x622A3667AA0A879EEB63011c63B6395feBe38880);
+        distr = TTD(0x652F0E0F01F5a9376cA1a8704c3F849861242C91);
+        treasury = Treasury(payable(0x62470fbE6768C723678886ddD574B818a4aba59e));
+        registry = AddressRegistry(0x8c41642801687A4F2f6C31aB40b3Ab74c3809e5E);
+        mytho = MYTHO(0x8651355f756075f26cc9568114fFe87B3Faffd4a);
 
         astrToken = 0x26e6f7c7047252DdE3dcBF26AA492e6a264Db655;
     }
@@ -90,23 +90,10 @@ contract Do is Script {
     function run() public {
         fork(minato);
 
-        MockToken customToken = MockToken(0xA43E037B79bED682Ce48eEF6e969EE5a7F39cf51);
-        // ERC20 kyoLP = ERC20(0x572634d00EddaD9ee693b513ef53260456B3B24e);
-        address totem = 0x5f97611B1d6A08571727F16aa27FdE021f36dEfF;
-
-        console.log("-- Deployer --");
-        console.log("totemTokens:", customToken.balanceOf(deployer));
-        console.log("astrTokens:", ERC20(astrToken).balanceOf(deployer));
-        console.log("mythoTokens:", mytho.balanceOf(deployer));
-        console.log("-- Totem --");
-        console.log("totemTokens:", customToken.balanceOf(totem));
-        console.log("astrTokens:", ERC20(astrToken).balanceOf(totem));
-        console.log("mythoTokens:", mytho.balanceOf(totem));
-        console.log("-- Treasury --");
-        console.log("totemTokens:", customToken.balanceOf(address(treasury)));
-        console.log("astrTokens:", ERC20(astrToken).balanceOf(address(treasury)));
-        console.log("mythoTokens:", mytho.balanceOf(address(treasury)));
-        console.log("native balance:", address(treasury).balance);
+        console.log("merit vesting 1:", mytho.meritVestingYear1());
+        console.log("merit vesting 2:", mytho.meritVestingYear2());
+        console.log("merit vesting 3:", mytho.meritVestingYear3());
+        console.log("merit vesting 4:", mytho.meritVestingYear4());
     }
 
     function fork(uint256 _forkId) internal {
@@ -115,14 +102,13 @@ contract Do is Script {
     }
 }
 
-// == Logs ==
-//   Address Registry: 0x5FFA0E0302E28f937B705D5e3CF7FbA453CD3eC0
-//   MeritManager: 0xe2629839031bea8Dd370d109969c5033DcdEb9aA
-//   MYTHO: 0x3e75e4991E4DeEcC2338577A125A560c490d6Da7
-//   Beacon: 0x6b240c09059A5DAE4ce8716F10726A06c82eED63
-//   TotemFactory: 0x6a89EdDE5D7a3C8Ec5103f7dB4Be2587660420D6
-//   TotemTokenDistributor: 0x891561D42158d12fAeCE264b1d312d1FD7EdBDF4
-//   Treasury: 0x8006aa62c46Fc731f3B1389AA0fF0d3f07d4d7f5
+//   Address Registry:      0x8c41642801687A4F2f6C31aB40b3Ab74c3809e5E
+//   MeritManager:          0x622A3667AA0A879EEB63011c63B6395feBe38880
+//   MYTHO:                 0x8651355f756075f26cc9568114fFe87B3Faffd4a
+//   Beacon:                0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec
+//   TotemFactory:          0xF0a09aC7a2242977566c8F8dF4F944ed7D333047
+//   TotemTokenDistributor: 0x652F0E0F01F5a9376cA1a8704c3F849861242C91
+//   Treasury:              0x62470fbE6768C723678886ddD574B818a4aba59e
 
 // Chainlink Minato price feeds
 // ASTR/USD 0x1e13086Ca715865e4d89b280e3BB6371dD48DabA

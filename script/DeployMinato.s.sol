@@ -1,34 +1,29 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
-import {Script, console, console2, StdStyle} from "forge-std/Script.sol";
+import {Script, console} from "forge-std/Script.sol";
 
-import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import {ERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 import {MeritManager as MM} from "../src/MeritManager.sol";
 import {TotemFactory as TF} from "../src/TotemFactory.sol";
 import {TotemTokenDistributor as TTD} from "../src/TotemTokenDistributor.sol";
-import {TotemToken as TT} from "../src/TotemToken.sol";
 import {Totem} from "../src/Totem.sol";
 import {MYTHO} from "../src/MYTHO.sol";
 import {Treasury} from "../src/Treasury.sol";
 import {AddressRegistry} from "../src/AddressRegistry.sol";
 import {MockToken} from "../test/mocks/MockToken.sol";
 
-import {IUniswapV2Factory} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Factory.sol";
-import {IUniswapV2Pair} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 import {IUniswapV2Router02} from "lib/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
-import {WETH} from "lib/solmate/src/tokens/WETH.sol";
+import {IUniswapV2Factory} from "lib/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 
-import {Deployer} from "test/util/Deployer.sol";
+import {WETH} from "lib/solmate/src/tokens/WETH.sol";
 
 /**
  * @dev Minato deployment
  */
-contract Deploy is Script {
+contract DeployMinato is Script {
     UpgradeableBeacon beacon;
 
     TransparentUpgradeableProxy factoryProxy;
@@ -175,6 +170,12 @@ contract Deploy is Script {
 
         paymentToken.mint(deployer, 1_000_000 ether);
 
+        // Set up Chainlink price feeds
+        distr.setPriceFeed(address(astrToken), 0x1e13086Ca715865e4d89b280e3BB6371dD48DabA); // ASTR/USD
+        
+        // Configure slippage percentage (default is 50 = 5%)
+        // distr.setSlippagePercentage(50); // Uncomment to explicitly set slippage
+
         mm.grantRole(mm.REGISTRATOR(), address(distr));
         mm.grantRole(mm.REGISTRATOR(), address(factory));
 
@@ -193,18 +194,18 @@ contract Deploy is Script {
     }
 }
 
-//   Address Registry:      0x5FFA0E0302E28f937B705D5e3CF7FbA453CD3eC0
-//   MeritManager:          0xe2629839031bea8Dd370d109969c5033DcdEb9aA
-//   MYTHO:                 0x3e75e4991E4DeEcC2338577A125A560c490d6Da7
-//   Beacon:                0x6b240c09059A5DAE4ce8716F10726A06c82eED63
-//   TotemFactory:          0x6a89EdDE5D7a3C8Ec5103f7dB4Be2587660420D6
-//   TotemTokenDistributor: 0x891561D42158d12fAeCE264b1d312d1FD7EdBDF4
-//   Treasury:              0x8006aa62c46Fc731f3B1389AA0fF0d3f07d4d7f5
+// Address Registry:      0x8c41642801687A4F2f6C31aB40b3Ab74c3809e5E // 0x7a4029E104a9588Bf991ADF0F1dfb99eC86F8754
+// MeritManager:          0x622A3667AA0A879EEB63011c63B6395feBe38880 // 0x704fa083f24ac13358f5399f3e6071be37baeaad
+// MYTHO:                 0x8651355f756075f26cc9568114fFe87B3Faffd4a // 0x0f4866b88482a60923f865272c83651758bcd214
+// Beacon:                0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec // 0xf34755260d8465478cA019f4104d0B664FC253FB
+// TotemFactory:          0xF0a09aC7a2242977566c8F8dF4F944ed7D333047 // 0xabe0620afdd162e18ab8a4f1e4d2c4414c86dff0
+// TotemTokenDistributor: 0x652F0E0F01F5a9376cA1a8704c3F849861242C91 // 0x0505102352f0952480481e06b786f39300495c83
+// Treasury:              0x62470fbE6768C723678886ddD574B818a4aba59e // 0x9d399a9f4f245d1bf1636d70ef5a246395f8de87
 
-// MeritVestingYear1: 0xf47e10c8F69816abf0B415C0D2775f41C5799D56
-// MeritVestingYear2: 0xa67524d033729D06D2d0d76a31b81eeD81B9E2D8
-// MeritVestingYear3: 0x801009F1a000bCA94c546C9606e7369E1C15083c
-// MeritVestingYear4: 0x3b206166C0986B57440AFb110efeeF49e47481E3
+// MeritVestingYear1: 0x880a6FFFD420905A12cCa67937F1fdc273458B55
+// MeritVestingYear2: 0x262D7BC9E964EeDe9a5aC6B85De97eF014d4B82d
+// MeritVestingYear3: 0xCe75B56B8FdE25d6408c2c1A7BfCB1f3ff11789d
+// MeritVestingYear4: 0x8Af1DE4b06F88831fef4E63BB7F78A566bF42c4a
 
 // Chainlink Minato price feeds
 // ASTR/USD 0x1e13086Ca715865e4d89b280e3BB6371dD48DabA
