@@ -145,6 +145,13 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             revert InsufficientTotemBalance();
         if (_totemTokenAmount == 0) revert ZeroAmount();
 
+        // Check if there are MYTHO tokens to claim in the current period
+        uint256 currentPeriod = MeritManager(meritManagerAddr).currentPeriod();
+        uint256 pendingReward = MeritManager(meritManagerAddr).getPendingReward(address(this), currentPeriod);
+        if (pendingReward > 0) {
+            MeritManager(meritManagerAddr).claimMytho(currentPeriod);
+        }
+
         // Get the circulating supply using the dedicated function
         uint256 circulatingSupply = getCirculatingSupply();
         if (circulatingSupply == 0) revert ZeroCirculatingSupply();
