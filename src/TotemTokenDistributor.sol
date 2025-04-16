@@ -120,7 +120,6 @@ contract TotemTokenDistributor is
 
     // Custom errors
     error AlreadyRegistered(address totemTokenAddr);
-    error NotAllowedForCustomTokens();
     error UnknownTotemToken(address tokenAddr);
     error WrongAmount(uint256 tokenAmount);
     error SalePeriodAlreadyEnded();
@@ -181,11 +180,8 @@ contract TotemTokenDistributor is
         TotemFactory.TotemData memory totemDataFromFactory = factory
             .getTotemData(factory.getLastId() - 1);
 
-        if (totemDataFromFactory.isCustomToken)
-            revert NotAllowedForCustomTokens();
         if (totems[totemDataFromFactory.totemTokenAddr].registered)
             revert AlreadyRegistered(totemDataFromFactory.totemTokenAddr);
-        if (paymentTokenAddr == address(0)) revert ZeroAddress();
 
         totems[totemDataFromFactory.totemTokenAddr] = TotemData(
             totemDataFromFactory.totemAddr,
