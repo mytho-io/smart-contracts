@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Copyright © 2025 Mytho. All Rights Reserved.
+// Copyright 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
@@ -27,11 +27,7 @@ contract MeritManager is
     using SafeERC20 for IERC20;
     using Address for address payable;
 
-    // State variables
-    address private mythoToken;
-    address private treasuryAddr;
-    address private registryAddr;
-    address[4] private vestingWallets;
+    // State variables - Configuration
     uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
     uint256 public periodDuration;
@@ -40,9 +36,17 @@ contract MeritManager is
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
     uint256 public lastProcessedPeriod; // Last period that was fully processed
     uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
+    uint256 public layerRewardPoints; // Merit points awarded for creating a Layer
+    uint256 public donationRewardPoints; // Merit points awarded for receiving a donation
+
+    // State variables - Addresses
+    address private mythoToken;
+    address private treasuryAddr;
+    address private registryAddr;
+    address[4] private vestingWallets;
     address[] public registeredTotemsList; // Array to track all registered totems
 
-    // Mappings
+    // State variables - Mappings
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
     mapping(uint256 period => mapping(address totemAddress => uint256 points))
         public totemMerit; // Merit points for each totem per period
@@ -62,15 +66,12 @@ contract MeritManager is
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
     event MeritCredited(address indexed totem, uint256 amount, uint256 period);
-    event TotemBoosted(
-        address indexed totem,
-        address indexed booster,
-        uint256 amount,
-        uint256 period
-    );
+    event TotemBoosted(address indexed totem, address indexed booster, uint256 amount, uint256 period); // prettier-ignore
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
+    event LayerRewardUpdated(uint256 amount); // prettier-ignore
+    event DonationRewardUpdated(uint256 amount); // prettier-ignore
 
     // Custom errors
     error TotemNotRegistered();
@@ -90,6 +91,7 @@ contract MeritManager is
     error InvalidPeriodDuration();
     error ZeroAmount();
     error EcosystemPaused();
+    error NotAuthorized();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -129,6 +131,8 @@ contract MeritManager is
         oneTotemBoost = 10; // 10 merit points per boost initially
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
         boostFee = 0.001 ether; // 0.001 native tokens for boost fee
+        layerRewardPoints = 10; // 10 merit points for layer creation initially
+        donationRewardPoints = 10; // 10 merit points for donation initially
     }
 
     // EXTERNAL FUNCTIONS
@@ -228,6 +232,30 @@ contract MeritManager is
         emit MythoClaimed(totemAddr, totemShare, _periodNum);
     }
 
+    /**
+     * @notice Awards merit points to a Totem for creating a layer
+     * @dev Only callable by the Layers contract
+     * @param _totemAddr Address of the Totem to credit merit to
+     */
+    function layerReward(address _totemAddr) external {
+        if (msg.sender != AddressRegistry(registryAddr).getLayers())
+            revert NotAuthorized();
+
+        _creditMerit(_totemAddr, layerRewardPoints);
+    }
+
+    /**
+     * @notice Awards merit points to a Totem for receiving a donation
+     * @dev Only callable by the Layers contract
+     * @param _totemAddr Address of the Totem to credit merit to
+     */
+    function donationReward(address _totemAddr) external {
+        if (msg.sender != AddressRegistry(registryAddr).getLayers())
+            revert NotAuthorized();
+
+        _creditMerit(_totemAddr, donationRewardPoints);
+    }
+
     // ADMIN FUNCTIONS
 
     /**
@@ -246,22 +274,7 @@ contract MeritManager is
         address _totemAddr,
         uint256 _amount
     ) external onlyRole(MANAGER) {
-        if (_amount == 0) revert ZeroAmount();
-        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
-
-        uint256 currentPeriod_ = currentPeriod();
-
-        // Apply Mythum multiplier if in Mythum period
-        if (isMythum()) {
-            _amount = (_amount * mythumMultiplier) / 100;
-        }
-
-        // Add merit to the totem
-        totemMerit[currentPeriod_][_totemAddr] += _amount;
-        totalMeritPoints[currentPeriod_] += _amount;
-
-        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
+        _creditMerit(_totemAddr, _amount);
     }
 
     /**
@@ -379,6 +392,24 @@ contract MeritManager is
     }
 
     /**
+     * @notice Sets the amount of merit points awarded for creating a layer
+     * @param _amount New amount of merit points
+     */
+    function setLayerRewardPoints(uint256 _amount) external onlyRole(MANAGER) {
+        layerRewardPoints = _amount;
+        emit LayerRewardUpdated(_amount);
+    }
+
+    /**
+     * @notice Sets the amount of merit points awarded for receiving a donation
+     * @param _amount New amount of merit points
+     */
+    function setDonationRewardPoints(uint256 _amount) external onlyRole(MANAGER) {
+        donationRewardPoints = _amount;
+        emit DonationRewardUpdated(_amount);
+    }
+
+    /**
      * @dev Throws if the contract is paused or if the ecosystem is paused.
      */
     function _requireNotPaused() internal view virtual override {
@@ -420,9 +451,33 @@ contract MeritManager is
                 emit MythoReleased(releasedMytho[period], period);
             }
 
-            wallet.release(address(mythoToken));
+            wallet.release(mythoToken);
             lastProcessedPeriod = _currentPeriod;
         }
+    }
+
+    /**
+     * @notice Credits merit points to a registered totem
+     * @param _totemAddr Address of the totem to credit
+     * @param _amount Amount of merit points to credit
+     */
+    function _creditMerit(address _totemAddr, uint256 _amount) private {
+        if (_amount == 0) revert ZeroAmount();
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+
+        uint256 currentPeriod_ = currentPeriod();
+
+        // Apply Mythum multiplier if in Mythum period
+        if (isMythum()) {
+            _amount = (_amount * mythumMultiplier) / 100;
+        }
+
+        // Add merit to the totem
+        totemMerit[currentPeriod_][_totemAddr] += _amount;
+        totalMeritPoints[currentPeriod_] += _amount;
+
+        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
     }
 
     // VIEW FUNCTIONS
@@ -474,7 +529,10 @@ contract MeritManager is
      * @param _end The ending index (exclusive)
      * @return Array of registered totem addresses within the specified range
      */
-    function getAllRegisteredTotems(uint256 _start, uint256 _end) external view returns (address[] memory) {
+    function getAllRegisteredTotems(
+        uint256 _start,
+        uint256 _end
+    ) external view returns (address[] memory) {
         if (_end > registeredTotemsList.length) {
             _end = registeredTotemsList.length;
         }
@@ -484,11 +542,11 @@ contract MeritManager is
 
         uint256 length = _end - _start;
         address[] memory result = new address[](length);
-        
+
         for (uint256 i = 0; i < length; i++) {
             result[i] = registeredTotemsList[_start + i];
         }
-        
+
         return result;
     }
 
