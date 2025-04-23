@@ -46,13 +46,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     bytes32 private constant TOTEM_DISTRIBUTOR = keccak256("TOTEM_DISTRIBUTOR");
 
     // Events
-    event TotemTokenBurned(
-        address indexed user,
-        uint256 totemTokenAmount,
-        uint256 paymentAmount,
-        uint256 mythoAmount,
-        uint256 lpAmount
-    );
+    event TotemTokenBurned(address indexed user, uint256 totemTokenAmount, uint256 paymentAmount, uint256 mythoAmount, uint256 lpAmount); // prettier-ignotre
     event SalePeriodEnded();
     event MythoCollected(address indexed user, uint256 periodNum);
 
