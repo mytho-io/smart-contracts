@@ -23,11 +23,11 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
 
     // State variables - Contracts
     TotemTokenDistributor private totemDistributor;
+    MeritManager private meritManager;
 
     // State variables - Addresses
     address private beaconAddr;
     address private treasuryAddr;
-    address private meritManagerAddr;
     address private registryAddr;
     address private feeTokenAddr;
 
@@ -35,8 +35,9 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     uint256 private creationFee;
     uint256 private lastId;
 
-    // Mappings
+    // State variables - Mappings
     mapping(uint256 totemId => TotemData data) private totemData;
+    mapping(address totemAddr => TotemData data) private totemDataByAddress;
 
     // Structs
     struct TotemData {
@@ -52,16 +53,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     bytes32 private constant WHITELISTED = keccak256("WHITELISTED");
 
     // Events
-    event TotemCreated(
-        address totemAddr,
-        address totemTokenAddr,
-        uint256 totemId
-    );
-    event TotemWithExistingTokenCreated(
-        address totemAddr,
-        address totemTokenAddr,
-        uint256 totemId
-    );
+    event TotemCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
+    event TotemWithExistingTokenCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address oldToken, address newToken);
     event BatchWhitelistUpdated(address[] tokens, bool isAdded);
@@ -99,7 +92,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             AddressRegistry(_registryAddr).getTotemTokenDistributor()
         );
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
-        meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
+        meritManager = MeritManager(AddressRegistry(_registryAddr).getMeritManager());
         beaconAddr = _beaconAddr;
         registryAddr = _registryAddr;
 
@@ -153,13 +146,16 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             )
         );
 
-        totemData[lastId++] = TotemData({
+        TotemData memory data = TotemData({
             creator: msg.sender,
             totemTokenAddr: address(totemToken),
             totemAddr: address(proxy),
             dataHash: _dataHash,
             isCustomToken: false
         });
+        
+        totemData[lastId++] = data;
+        totemDataByAddress[address(proxy)] = data;
 
         // register the totem and make initial tokens distribution
         totemDistributor.register();
@@ -202,15 +198,18 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             )
         );
 
-        totemData[lastId++] = TotemData({
+        TotemData memory data = TotemData({
             creator: msg.sender,
             totemTokenAddr: _tokenAddr,
             totemAddr: address(proxy),
             dataHash: _dataHash,
             isCustomToken: true
         });
+        
+        totemData[lastId++] = data;
+        totemDataByAddress[address(proxy)] = data;
 
-        MeritManager(meritManagerAddr).register(address(proxy));
+        meritManager.register(address(proxy));
 
         emit TotemWithExistingTokenCreated(
             address(proxy),
@@ -369,7 +368,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @notice Gets data for a specific totem
+     * @notice Gets data for a specific totem by ID
      * @param _totemId The ID of the totem
      * @return The totem data structure
      */
@@ -378,6 +377,19 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     ) external view returns (TotemData memory) {
         TotemData memory data = totemData[_totemId];
         if (data.totemAddr == address(0)) revert TotemNotFound(_totemId);
+        return data;
+    }
+
+    /**
+     * @notice Gets data for a specific totem by address
+     * @param _totemAddr The address of the totem
+     * @return The totem data structure
+     */
+    function getTotemDataByAddress(
+        address _totemAddr
+    ) external view returns (TotemData memory) {
+        TotemData memory data = totemDataByAddress[_totemAddr];
+        if (data.totemAddr == address(0)) revert TotemNotFound(0);
         return data;
     }
 }
