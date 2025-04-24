@@ -19,6 +19,13 @@ import {AddressRegistry} from "./AddressRegistry.sol";
 import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
 import {TotemFactory} from "./TotemFactory.sol";
 
+/**
+ * @title Layers
+ * @notice This contract represents a collection of layers in the MYTHO ecosystem, managing layer creation, boosting, and rewards.
+ *      Includes features like layer registration, boosting, and reward distribution.
+ *      Rewards are distributed in the form of SHARD tokens, which are minted and transferred to the user.
+ *      Contract can be paused in emergency situations.
+ */
 contract Layers is
     ERC721Upgradeable,
     ERC721RoyaltyUpgradeable,
@@ -45,6 +52,7 @@ contract Layers is
     uint256 public boostWindow; // Boost window duration (24 hours)
     uint256 public minTotemTokenBalance; // Minimum totem token balance required to create a layer
     uint256 public donationFeePercentage; // Percentage of donation taken as fee (1000 = 10%)
+    uint256 public minDonationFee; // Minimum fee amount in wei for donations
 
     // State variables - Addresses
     address private registryAddr;
@@ -81,6 +89,7 @@ contract Layers is
     event ShardTokenSet(address indexed shards); // prettier-ignore
     event PendingLayerAdded(uint256 indexed pendingId,address indexed creator,address indexed totemAddr,bytes32 metadataHash); // prettier-ignore
     event DonationFeeUpdated(uint256 oldFee, uint256 newFee); // prettier-ignore
+    event MinDonationFeeUpdated(uint256 newFee); // prettier-ignore
 
     // Custom errors
     error InvalidTotem();
@@ -101,6 +110,7 @@ contract Layers is
     error BoostWindowNotClosed();
     error InvalidFeePercentage();
     error DonationFailed();
+    error FeeTooLow();
 
     /**
      * @notice Initializes the contract with the registry address
@@ -132,6 +142,7 @@ contract Layers is
         boostWindow = 24 hours; // boost window duration (24 hours)
         minTotemTokenBalance = 250_000 ether; // min totem token balance required to create a layer
         donationFeePercentage = 0; // 0% donation fee by default
+        minDonationFee = 0; // 0 minimum donation fee by default
 
         // Start counters from 1 so 0 can be used as "no pending layer" indicator
         layerCounter = 1;
@@ -363,10 +374,11 @@ contract Layers is
     ) external payable whenNotPaused {
         Layer memory layer = layers[_layerId];
         if (layer.creator == address(0)) revert LayerNotFound();
-        if (msg.value == 0) revert InvalidAmount();
 
         // Calculate fee
         uint256 fee = (msg.value * donationFeePercentage) / 10000;
+        if (fee < minDonationFee) revert FeeTooLow();
+
         uint256 creatorAmount = msg.value - fee;
 
         // Send fee to Treasury
@@ -380,8 +392,8 @@ contract Layers is
         // Update total donations
         totalDonations[_layerId] += msg.value;
 
-        // Award merit points to the totem
-        meritManager.donationReward(layer.totemAddr);
+        // Award merit points to the totem based on donation amount
+        meritManager.donationReward(layer.totemAddr, msg.value);
 
         emit DonationReceived(_layerId, msg.sender, msg.value, fee);
     }
@@ -457,6 +469,15 @@ contract Layers is
         uint256 oldFee = donationFeePercentage;
         donationFeePercentage = _percentage;
         emit DonationFeeUpdated(oldFee, _percentage);
+    }
+
+    /**
+     * @notice Sets the minimum fee amount for donations
+     * @param _minFee The new minimum fee amount in wei
+     */
+    function setMinDonationFee(uint256 _minFee) external onlyRole(MANAGER) {
+        minDonationFee = _minFee;
+        emit MinDonationFeeUpdated(_minFee);
     }
 
     /**

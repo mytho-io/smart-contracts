@@ -30,14 +30,14 @@ contract MeritManager is
     // State variables - Configuration
     uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
-    uint256 public periodDuration;
+    uint256 public periodDuration; // Duration of each period in seconds
     uint256 public startTime; // Initially set to deployment timestamp, updated when period duration changes
     uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
     uint256 public lastProcessedPeriod; // Last period that was fully processed
     uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
     uint256 public layerRewardPoints; // Merit points awarded for creating a Layer
-    uint256 public donationRewardPoints; // Merit points awarded for receiving a donation
+    uint256 public donationMeritPercentage; // Percentage of donation amount that converts to merit (10000 = 100%)
 
     // State variables - Addresses
     address private mythoToken;
@@ -95,6 +95,7 @@ contract MeritManager is
     error EcosystemPaused();
     error NotAuthorized();
     error InsufficientKarma();
+    error InvalidPercentage();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -135,7 +136,7 @@ contract MeritManager is
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
         boostFee = 0.001 ether; // 0.001 native tokens for boost fee
         layerRewardPoints = 10; // 10 merit points for layer creation initially
-        donationRewardPoints = 10; // 10 merit points for donation initially
+        donationMeritPercentage = 10000; // 100% of donation amount converts to merit initially
     }
 
     // EXTERNAL FUNCTIONS
@@ -251,12 +252,15 @@ contract MeritManager is
      * @notice Awards merit points to a Totem for receiving a donation
      * @dev Only callable by the Layers contract
      * @param _totemAddr Address of the Totem to credit merit to
+     * @param _donationAmount Amount of the donation in wei
      */
-    function donationReward(address _totemAddr) external {
+    function donationReward(address _totemAddr, uint256 _donationAmount) external {
         if (msg.sender != AddressRegistry(registryAddr).getLayers())
             revert NotAuthorized();
 
-        _creditMerit(_totemAddr, donationRewardPoints);
+        // Convert donation amount to merit points scaled by percentage
+        uint256 meritPoints = (_donationAmount * donationMeritPercentage) / 10000;
+        _creditMerit(_totemAddr, meritPoints);
     }
 
     // ADMIN FUNCTIONS
@@ -404,12 +408,13 @@ contract MeritManager is
     }
 
     /**
-     * @notice Sets the amount of merit points awarded for receiving a donation
-     * @param _amount New amount of merit points
+     * @notice Sets the percentage of donation amount that converts to merit points
+     * @param _percentage New percentage (10000 = 100%)
      */
-    function setDonationRewardPoints(uint256 _amount) external onlyRole(MANAGER) {
-        donationRewardPoints = _amount;
-        emit DonationRewardUpdated(_amount);
+    function setDonationMeritPercentage(uint256 _percentage) external onlyRole(MANAGER) {
+        if (_percentage > 10000) revert InvalidPercentage();
+        donationMeritPercentage = _percentage;
+        emit ParameterUpdated("donationMeritPercentage", _percentage);
     }
 
     /**
