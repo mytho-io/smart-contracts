@@ -327,7 +327,7 @@ contract Layers is
         uint256 totalSupply = IERC20(totemTokenAddr).totalSupply();
 
         // Calculate user's shard reward
-        uint256 shardReward = calculateShardReward(
+        uint256 shardReward = _calculateShardReward(
             boostAmount,
             layer.totalBoostedTokens,
             totalSupply
@@ -344,7 +344,7 @@ contract Layers is
 
             // If this is the first unboost, calculate and distribute creator reward
             if (!creatorRewardClaimed[_layerId]) {
-                uint256 totalLayerRewards = calculateShardReward(
+                uint256 totalLayerRewards = _calculateShardReward(
                     layer.totalBoostedTokens,
                     layer.totalBoostedTokens,
                     totalSupply
@@ -532,17 +532,16 @@ contract Layers is
      * @param _tokenTotalSupply Total supply of the totem token
      * @return shardReward Amount of shards to be rewarded
      */
-    function calculateShardReward(
+    function _calculateShardReward(
         uint256 _userLockedTokens,
         uint256 _totalLockedTokens,
         uint256 _tokenTotalSupply
     ) internal view returns (uint256) {
         if (_totalLockedTokens == 0 || _tokenTotalSupply == 0) return 0;
 
-        // Calculate square root of (L/T)
-        uint256 sqrtRatio = Math.sqrt(
-            (_totalLockedTokens * 1e18) / _tokenTotalSupply
-        );
+        // Calculate square root of (L/T), capped at 10%
+        uint256 lockedRatio = Math.min((_totalLockedTokens * 1e18) / _tokenTotalSupply, 1e17);
+        uint256 sqrtRatio = Math.sqrt(lockedRatio);
 
         // Calculate (l/T)
         uint256 userRatio = (_userLockedTokens * 1e18) / _tokenTotalSupply;
