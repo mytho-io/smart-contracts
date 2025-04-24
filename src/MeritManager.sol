@@ -56,6 +56,7 @@ contract MeritManager is
     mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Whether a user has boosted in a period
     mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Which Totem a user boosted in a period
     mapping(address => bool) public registeredTotems; // Totem state tracking
+    mapping(address => uint256) public totemKarma; // Karma points per totem
 
     // Constants - Roles
     bytes32 public constant MANAGER = keccak256("MANAGER");
@@ -72,6 +73,7 @@ contract MeritManager is
     event ParameterUpdated(string parameterName, uint256 newValue);
     event LayerRewardUpdated(uint256 amount); // prettier-ignore
     event DonationRewardUpdated(uint256 amount); // prettier-ignore
+    event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
 
     // Custom errors
     error TotemNotRegistered();
@@ -92,6 +94,7 @@ contract MeritManager is
     error ZeroAmount();
     error EcosystemPaused();
     error NotAuthorized();
+    error InsufficientKarma();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -407,6 +410,37 @@ contract MeritManager is
     function setDonationRewardPoints(uint256 _amount) external onlyRole(MANAGER) {
         donationRewardPoints = _amount;
         emit DonationRewardUpdated(_amount);
+    }
+
+    /**
+     * @notice Increases karma points for a totem
+     * @param _totemAddr Address of the totem
+     * @param _amount Amount of karma points to add
+     */
+    function increaseKarma(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+
+        totemKarma[_totemAddr] += _amount;
+        emit KarmaUpdated(_totemAddr, _amount, true);
+    }
+
+    /**
+     * @notice Decreases karma points for a totem
+     * @param _totemAddr Address of the totem
+     * @param _amount Amount of karma points to subtract
+     */
+    function decreaseKarma(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+        if (totemKarma[_totemAddr] < _amount) revert InsufficientKarma();
+
+        totemKarma[_totemAddr] -= _amount;
+        emit KarmaUpdated(_totemAddr, _amount, false);
     }
 
     /**
