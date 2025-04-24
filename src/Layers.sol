@@ -142,7 +142,7 @@ contract Layers is
         boostWindow = 24 hours; // boost window duration (24 hours)
         minTotemTokenBalance = 250_000 ether; // min totem token balance required to create a layer
         donationFeePercentage = 0; // 0% donation fee by default
-        minDonationFee = 0; // 0 minimum donation fee by default
+        minDonationFee = 0.001 ether; // 0.001 minimum donation fee by default
 
         // Start counters from 1 so 0 can be used as "no pending layer" indicator
         layerCounter = 1;
