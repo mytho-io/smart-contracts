@@ -37,7 +37,7 @@ contract MeritManager is
     uint256 public lastProcessedPeriod; // Last period that was fully processed
     uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
     uint256 public layerRewardPoints; // Merit points awarded for creating a Layer
-    uint256 public donationMeritPercentage; // Percentage of donation amount that converts to merit (10000 = 100%)
+    uint256 public donationMeritDivisor; // Donation amount is divided by this to get merit points (e.g. 1e14)
 
     // State variables - Addresses
     address private mythoToken;
@@ -72,7 +72,6 @@ contract MeritManager is
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
     event LayerRewardUpdated(uint256 amount); // prettier-ignore
-    event DonationRewardUpdated(uint256 amount); // prettier-ignore
     event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
 
     // Custom errors
@@ -95,7 +94,8 @@ contract MeritManager is
     error EcosystemPaused();
     error NotAuthorized();
     error InsufficientKarma();
-    error InvalidPercentage();
+    error InvalidDivisor();
+    error InvalidAmount();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -136,7 +136,7 @@ contract MeritManager is
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
         boostFee = 0.001 ether; // 0.001 native tokens for boost fee
         layerRewardPoints = 10; // 10 merit points for layer creation initially
-        donationMeritPercentage = 10000; // 100% of donation amount converts to merit initially
+        donationMeritDivisor = 1e14; // 1e14 divisor initially
     }
 
     // EXTERNAL FUNCTIONS
@@ -258,8 +258,10 @@ contract MeritManager is
         if (msg.sender != AddressRegistry(registryAddr).getLayers())
             revert NotAuthorized();
 
-        // Convert donation amount to merit points scaled by percentage
-        uint256 meritPoints = (_donationAmount * donationMeritPercentage) / 10000;
+        // Convert donation amount to merit points by dividing by the divisor
+        uint256 meritPoints = _donationAmount / donationMeritDivisor;
+        if (meritPoints == 0) revert InvalidAmount();
+
         _creditMerit(_totemAddr, meritPoints);
     }
 
@@ -408,13 +410,13 @@ contract MeritManager is
     }
 
     /**
-     * @notice Sets the percentage of donation amount that converts to merit points
-     * @param _percentage New percentage (10000 = 100%)
+     * @notice Sets the divisor used to calculate merit points from donation amount
+     * @param _divisor New divisor value (e.g. 1e14 means 0.001 ETH = 10 merit points)
      */
-    function setDonationMeritPercentage(uint256 _percentage) external onlyRole(MANAGER) {
-        if (_percentage > 10000) revert InvalidPercentage();
-        donationMeritPercentage = _percentage;
-        emit ParameterUpdated("donationMeritPercentage", _percentage);
+    function setDonationMeritDivisor(uint256 _divisor) external onlyRole(MANAGER) {
+        if (_divisor == 0) revert InvalidDivisor();
+        donationMeritDivisor = _divisor;
+        emit ParameterUpdated("donationMeritDivisor", _divisor);
     }
 
     /**
