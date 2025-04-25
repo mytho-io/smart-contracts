@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Copyright © 2025 Mytho. All Rights Reserved.
+// Copyright 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
@@ -38,6 +38,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     // State variables - Mappings
     mapping(uint256 totemId => TotemData data) private totemData;
     mapping(address totemAddr => TotemData data) private totemDataByAddress;
+    mapping(address token => mapping(address user => bool)) private authorized;
 
     // Structs
     struct TotemData {
@@ -50,22 +51,21 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
 
     // Constants - Roles
     bytes32 private constant MANAGER = keccak256("MANAGER");
-    bytes32 private constant WHITELISTED = keccak256("WHITELISTED");
 
     // Events
     event TotemCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
     event TotemWithExistingTokenCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address oldToken, address newToken);
-    event BatchWhitelistUpdated(address[] tokens, bool isAdded);
+    event TokenAuthorizationUpdated(address indexed token, address indexed user, bool isAuthorized); // prettier-ignore
 
     // Custom errors
-    error AlreadyWhitelisted(address totemTokenAddr);
-    error NotWhitelisted(address totemTokenAddr);
+    error TokenAlreadyAuthorized(address token, address user);
     error ZeroAddress();
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
     error EcosystemPaused();
+    error UserNotAuthorized(address user, address token);
 
     /**
      * @notice Initializes the TotemFactory contract
@@ -130,7 +130,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         TotemToken totemToken = new TotemToken(
             _tokenName,
             _tokenSymbol,
-            address(totemDistributor)
+            registryAddr
         );
 
         BeaconProxy proxy = new BeaconProxy(
@@ -182,8 +182,9 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         // Collect fee in ASTR tokens
         _collectFee(msg.sender);
 
-        if (!hasRole(WHITELISTED, _tokenAddr))
-            revert NotWhitelisted(_tokenAddr);
+        // Check if user is authorized to create totem with this token
+        if (!authorized[_tokenAddr][msg.sender])
+            revert UserNotAuthorized(msg.sender, _tokenAddr);
 
         BeaconProxy proxy = new BeaconProxy(
             beaconAddr,
@@ -243,61 +244,55 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @notice Adds multiple tokens to the whitelist
-     * @param _tokens Array of token addresses to whitelist
+     * @notice Authorizes users for a token
+     * @param _token The token address
+     * @param _users Array of user addresses to authorize
      */
-    function batchAddToWhitelist(
-        address[] calldata _tokens
-    ) external onlyRole(MANAGER) {
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            if (!hasRole(WHITELISTED, _tokens[i])) {
-                grantRole(WHITELISTED, _tokens[i]);
+    function authorizeUsers(
+        address _token,
+        address[] calldata _users
+    ) public onlyRole(MANAGER) {
+        if (_token == address(0)) revert ZeroAddress();
+
+        for (uint256 i = 0; i < _users.length; i++) {
+            if (_users[i] != address(0)) {
+                if (authorized[_token][_users[i]]) 
+                    revert TokenAlreadyAuthorized(_token, _users[i]);
+                
+                authorized[_token][_users[i]] = true;
+                emit TokenAuthorizationUpdated(_token, _users[i], true);
             }
         }
-
-        emit BatchWhitelistUpdated(_tokens, true);
     }
 
     /**
-     * @notice Removes multiple tokens from the whitelist
-     * @param _tokens Array of token addresses to remove from whitelist
+     * @notice Removes authorization from users for a token
+     * @param _token The token address
+     * @param _users Array of user addresses to deauthorize
      */
-    function batchRemoveFromWhitelist(
-        address[] calldata _tokens
-    ) external onlyRole(MANAGER) {
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            if (hasRole(WHITELISTED, _tokens[i])) {
-                revokeRole(WHITELISTED, _tokens[i]);
+    function deauthorizeUsers(
+        address _token,
+        address[] calldata _users
+    ) public onlyRole(MANAGER) {
+        for (uint256 i = 0; i < _users.length; i++) {
+            if (_users[i] != address(0)) {
+                authorized[_token][_users[i]] = false;
+                emit TokenAuthorizationUpdated(_token, _users[i], false);
             }
         }
-
-        emit BatchWhitelistUpdated(_tokens, false);
     }
 
     /**
-     * @notice Adds a single token to the whitelist
-     * @param _token The token address to whitelist
+     * @notice Checks if a user is authorized for a token
+     * @param _token The token address
+     * @param _user The user address
+     * @return Whether the user is authorized
      */
-    function addTokenToWhitelist(address _token) public onlyRole(MANAGER) {
-        if (hasRole(WHITELISTED, _token)) revert AlreadyWhitelisted(_token);
-        grantRole(WHITELISTED, _token);
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = _token;
-        emit BatchWhitelistUpdated(tokens, true);
-    }
-
-    /**
-     * @notice Removes a single token from the whitelist
-     * @param _token The token address to remove from whitelist
-     */
-    function removeTokenFromWhitelist(address _token) public onlyRole(MANAGER) {
-        if (!hasRole(WHITELISTED, _token)) revert NotWhitelisted(_token);
-        revokeRole(WHITELISTED, _token);
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = _token;
-        emit BatchWhitelistUpdated(tokens, false);
+    function isUserAuthorized(
+        address _token,
+        address _user
+    ) external view returns (bool) {
+        return authorized[_token][_user];
     }
 
     /**
