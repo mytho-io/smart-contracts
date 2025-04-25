@@ -43,8 +43,8 @@ contract Layers is
     TotemFactory private factory;
 
     // State variables - Configuration
-    uint256 private layerCounter;
-    uint256 private pendingLayerCounter;
+    uint256 public layerCounter;
+    uint256 public pendingLayerCounter;
     uint256 public baseShardReward; // Base Shards for formula (S)
     uint256 public minAuthorShardReward; // Minimum Shards for authors
     uint256 public authorShardPercentage; // Percentage of booster Shards for authors
@@ -70,7 +70,7 @@ contract Layers is
     struct Layer {
         address totemAddr; // Associated Totem
         address creator; // Layer creator
-        bytes32 metadataHash; // Hash of metadata (keccak256)
+        bytes metadataHash; // Hash of metadata (keccak256)
         uint32 createdAt; // Creation timestamp
         uint224 totalBoostedTokens; // Total tokens boosted (L)
     }
@@ -79,7 +79,7 @@ contract Layers is
     bytes32 public constant MANAGER = keccak256("MANAGER");
 
     // Events
-    event LayerCreated(uint256 indexed layerId, address indexed creator, address indexed totemAddr, bytes32 metadataHash, bool isPending); // prettier-ignore
+    event LayerCreated(uint256 indexed layerId, address indexed creator, address indexed totemAddr, bytes metadataHash, bool isPending); // prettier-ignore
     event LayerApproved(uint256 indexed pendingId, uint256 indexed newLayerId); // prettier-ignore
     event LayerRejected(uint256 indexed pendingId); // prettier-ignore
     event LayerBoosted(uint256 indexed layerId, address indexed booster, uint256 tokenAmount); // prettier-ignore
@@ -87,12 +87,12 @@ contract Layers is
     event DonationReceived(uint256 indexed layerId, address indexed donor, uint256 amount, uint256 fee); // prettier-ignore
     event ShardsDistributed(uint256 indexed layerId, address indexed recipient, uint256 amount); // prettier-ignore
     event ShardTokenSet(address indexed shards); // prettier-ignore
-    event PendingLayerAdded(uint256 indexed pendingId,address indexed creator,address indexed totemAddr,bytes32 metadataHash); // prettier-ignore
+    event PendingLayerAdded(uint256 indexed pendingId,address indexed creator,address indexed totemAddr,bytes metadataHash); // prettier-ignore
     event DonationFeeUpdated(uint256 oldFee, uint256 newFee); // prettier-ignore
     event MinDonationFeeUpdated(uint256 newFee); // prettier-ignore
+    event BoostWindowUpdated(uint256 oldWindow, uint256 newWindow); // prettier-ignore
 
     // Custom errors
-    error InvalidTotem();
     error InvalidMetadataHash();
     error LayerNotFound();
     error NotLayerOwner();
@@ -107,10 +107,10 @@ contract Layers is
     error AlreadyBoosted();
     error BoostNotFound();
     error BoostLocked();
-    error BoostWindowNotClosed();
     error InvalidFeePercentage();
     error DonationFailed();
     error FeeTooLow();
+    error InvalidDuration();
 
     /**
      * @notice Initializes the contract with the registry address
@@ -135,7 +135,7 @@ contract Layers is
             AddressRegistry(_registryAddr).getTotemFactory()
         );
 
-        baseShardReward = 100; // S in formula
+        baseShardReward = 1 ether; // S in formula
         minAuthorShardReward = 50;
         authorShardPercentage = 1000; // 10%
         royaltyPercentage = 1000; // 10% (1000 basis points = 10%)
@@ -159,15 +159,14 @@ contract Layers is
      */
     function createLayer(
         address _totemAddr,
-        bytes32 _dataHash
+        bytes memory _dataHash
     ) external whenNotPaused nonReentrant returns (uint256) {
         TotemFactory.TotemData memory totemData = factory.getTotemDataByAddress(
             _totemAddr
         );
 
         // Check if Totem exists
-        if (totemData.creator == address(0)) revert InvalidTotem();
-        if (_dataHash == bytes32(0)) revert InvalidMetadataHash();
+        if (_dataHash.length == 0) revert InvalidMetadataHash();
 
         // Check if caller has enough totem tokens
         if (
@@ -205,10 +204,12 @@ contract Layers is
         // Only mint Layer NFT if auto-approved
         if (isAutoApproved) {
             _safeMint(msg.sender, id);
-            _setTokenRoyalty(id, msg.sender, uint96(royaltyPercentage * 100)); // Set royalty (1000 = 10%)
+            _setTokenRoyalty(id, msg.sender, uint96(royaltyPercentage)); // Set royalty (1000 = 10%)
 
-            // Award Merit point for created layer
-            meritManager.layerReward(_totemAddr);
+            // Award Merit point for created layer only if totem is registered in Merit Manager
+            if (meritManager.isRegisteredTotem(_totemAddr)) {
+                meritManager.layerReward(_totemAddr);
+            }
         }
 
         emit LayerCreated(
@@ -230,7 +231,7 @@ contract Layers is
     function verifyLayer(
         uint256 _pendingId,
         bool _approve
-    ) external whenNotPaused {
+    ) external whenNotPaused nonReentrant returns (uint256) {
         Layer storage pendingLayer = pendingLayers[_pendingId];
 
         if (pendingLayer.creator == address(0)) revert LayerNotFound();
@@ -244,9 +245,11 @@ contract Layers is
 
         address creator = pendingLayer.creator;
 
+        uint256 newLayerId;
+
         // If approved, move from pending to active layers and mint NFT
         if (_approve) {
-            uint256 newLayerId = layerCounter++;
+            newLayerId = layerCounter++;
             Layer storage layer = layers[newLayerId];
             layer.totemAddr = pendingLayer.totemAddr;
             layer.creator = creator;
@@ -257,11 +260,13 @@ contract Layers is
             _setTokenRoyalty(
                 newLayerId,
                 creator,
-                uint96(royaltyPercentage * 100)
+                uint96(royaltyPercentage)
             );
 
-            // Award Merit point for approved layer
-            meritManager.layerReward(pendingLayer.totemAddr);
+            // Award Merit point for approved layer only if totem is registered in Merit Manager
+            if (meritManager.isRegisteredTotem(pendingLayer.totemAddr)) {
+                meritManager.layerReward(pendingLayer.totemAddr);
+            }
 
             emit LayerApproved(_pendingId, newLayerId);
         } else {
@@ -270,6 +275,8 @@ contract Layers is
 
         // Clean up pending layer
         delete userPendingLayer[creator];
+
+        return newLayerId;
     }
 
     /**
@@ -392,8 +399,10 @@ contract Layers is
         // Update total donations
         totalDonations[_layerId] += msg.value;
 
-        // Award merit points to the totem based on donation amount
-        meritManager.donationReward(layer.totemAddr, msg.value);
+        // Award Merit points for donation only if totem is registered in Merit Manager
+        if (meritManager.isRegisteredTotem(layer.totemAddr)) {
+            meritManager.donationReward(layer.totemAddr, msg.value);
+        }
 
         emit DonationReceived(_layerId, msg.sender, msg.value, fee);
     }
@@ -478,6 +487,17 @@ contract Layers is
     function setMinDonationFee(uint256 _minFee) external onlyRole(MANAGER) {
         minDonationFee = _minFee;
         emit MinDonationFeeUpdated(_minFee);
+    }
+
+    /**
+     * @notice Sets the boost window duration
+     * @param _window The new boost window duration in seconds
+     */
+    function setBoostWindow(uint256 _window) external onlyRole(MANAGER) {
+        if (_window == 0) revert InvalidDuration();
+        uint256 oldWindow = boostWindow;
+        boostWindow = _window;
+        emit BoostWindowUpdated(oldWindow, _window);
     }
 
     /**
@@ -566,46 +586,31 @@ contract Layers is
     /**
      * @notice Get layer information without total boosted tokens
      * @param _layerId The layer ID
-     * @return totemAddr Address of the associated Totem
-     * @return creator Address of the layer creator
-     * @return metadataHash Hash of the layer metadata
-     * @return createdAt Timestamp when the layer was created
+     * @return layer Layer information
      */
-    function getLayerInfo(
+    function getLayer(
         uint256 _layerId
     )
         external
         view
-        returns (
-            address totemAddr,
-            address creator,
-            bytes32 metadataHash,
-            uint32 createdAt
-        )
+        returns (Layer memory)
     {
         Layer memory layer = layers[_layerId];
         if (layer.creator == address(0)) revert LayerNotFound();
-        return (
-            layer.totemAddr,
-            layer.creator,
-            layer.metadataHash,
-            layer.createdAt
-        );
+        // If boost window is not closed, return 0
+        if (block.timestamp <= layer.createdAt + boostWindow) layer.totalBoostedTokens = 0;
+        return layer;
     }
 
     /**
-     * @notice Get total boosted tokens for a layer
+     * @notice Get pending layer information
      * @param _layerId The layer ID
-     * @return totalBoosted Total amount of boosted tokens
+     * @return layer Layer information
      */
-    function getLayerTotalBoosted(
+    function getPendingLayer(
         uint256 _layerId
-    ) external view returns (uint224 totalBoosted) {
-        Layer memory layer = layers[_layerId];
-        if (layer.creator == address(0)) revert LayerNotFound();
-        if (block.timestamp <= layer.createdAt + boostWindow)
-            revert BoostWindowNotClosed();
-        return layer.totalBoostedTokens;
+    ) external view returns (Layer memory) {
+        return pendingLayers[_layerId];
     }
 
     /**
@@ -613,7 +618,7 @@ contract Layers is
      * @param _layerId The layer ID
      * @return The metadata hash
      */
-    function getMetadataHash(uint256 _layerId) external view returns (bytes32) {
+    function getMetadataHash(uint256 _layerId) external view returns (bytes memory) {
         Layer storage layer = layers[_layerId];
         if (layer.creator == address(0)) revert LayerNotFound();
         return layer.metadataHash;
