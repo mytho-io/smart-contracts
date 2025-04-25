@@ -37,22 +37,20 @@ contract Shards is
      * @notice Initializes the Shards contract
      * @dev Sets up initial roles and connects to the ecosystem registry
      * @param _registryAddr Address of the AddressRegistry contract
-     * @param _layerNFT Address of the Layers contract that will have minting rights
      */
-    function initialize(address _registryAddr, address _layerNFT) public initializer {
+    function initialize(address _registryAddr) public initializer {
         __ERC20_init("MYTHO Shard Token", "SHARD");
         __ERC20Burnable_init();
         __ERC20Pausable_init();
         __AccessControl_init();
 
         if (_registryAddr == address(0)) revert ZeroAddress();
-        if (_layerNFT == address(0)) revert ZeroAddress();
 
         registryAddr = _registryAddr;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
-        _grantRole(MINTER_ROLE, _layerNFT);
+        _grantRole(MINTER_ROLE, AddressRegistry(registryAddr).getLayers());
     }
 
     // EXTERNAL FUNCTIONS
