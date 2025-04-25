@@ -142,7 +142,8 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(
             abi.encodeWithSelector(
-                TF.NotWhitelisted.selector,
+                TF.UserNotAuthorized.selector,
+                userA,
                 address(customToken)
             )
         );
@@ -153,9 +154,11 @@ contract ComplexTest is Test {
         );
 
         prank(deployer);
-        factory.addTokenToWhitelist(address(customToken));
+        address[] memory users = new address[](1);
+        users[0] = userA;
+        factory.authorizeUsers(address(customToken), users);
         assertTrue(
-            factory.hasRole(keccak256("WHITELISTED"), address(customToken))
+            factory.isUserAuthorized(address(customToken), userA)
         );
 
         prank(userA);
@@ -175,7 +178,7 @@ contract ComplexTest is Test {
         assertFalse(ttdData.registered);
 
         // check if new totem registered in MeritManager
-        assertTrue(mm.registeredTotems(data.totemAddr));
+        assertTrue(mm.isRegisteredTotem(data.totemAddr));
     }
 
     function test_getTotemData() public {
@@ -719,7 +722,9 @@ contract ComplexTest is Test {
         customToken.mint(deployer, 1_000_000 ether);
         
         prank(deployer);
-        factory.addTokenToWhitelist(address(customToken));
+        address[] memory users = new address[](1);
+        users[0] = userA;
+        factory.authorizeUsers(address(customToken), users);
         
         // Transfer tokens to userA for creation fee and custom token
         prank(deployer);
@@ -885,12 +890,13 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(
             abi.encodeWithSelector(
-                TF.NotWhitelisted.selector,
+                TF.UserNotAuthorized.selector,
+                userA,
                 address(customToken)
             )
         );
         factory.createTotemWithExistingToken(
-            "dataHash",
+            "customDataHash",
             address(customToken),
             new address[](0)
         );
@@ -1417,31 +1423,38 @@ contract ComplexTest is Test {
         factory.setFeeToken(address(newFeeToken));
         assertEq(factory.getFeeToken(), address(newFeeToken));
 
-        // Test batchAddToWhitelist
-        address[] memory tokensToWhitelist = new address[](2);
-        tokensToWhitelist[0] = makeAddr("token1");
-        tokensToWhitelist[1] = makeAddr("token2");
+        // Test token authorization
+        address[] memory tokensToAuth = new address[](2);
+        tokensToAuth[0] = makeAddr("token1");
+        tokensToAuth[1] = makeAddr("token2");
 
+        address[] memory usersToAuth = new address[](2);
+        usersToAuth[0] = userA;
+        usersToAuth[1] = userB;
+
+        // Test authorizing users for tokens
         prank(deployer);
-        factory.batchAddToWhitelist(tokensToWhitelist);
+        factory.authorizeUsers(tokensToAuth[0], usersToAuth);
+        factory.authorizeUsers(tokensToAuth[1], usersToAuth);
 
-        assertTrue(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[0])
-        );
-        assertTrue(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[1])
-        );
+        // Verify authorizations
+        assertTrue(factory.isUserAuthorized(tokensToAuth[0], userA));
+        assertTrue(factory.isUserAuthorized(tokensToAuth[0], userB));
+        assertTrue(factory.isUserAuthorized(tokensToAuth[1], userA));
+        assertTrue(factory.isUserAuthorized(tokensToAuth[1], userB));
 
-        // Test batchRemoveFromWhitelist
+        // Test deauthorizing users
         prank(deployer);
-        factory.batchRemoveFromWhitelist(tokensToWhitelist);
+        factory.deauthorizeUsers(tokensToAuth[0], usersToAuth);
 
-        assertFalse(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[0])
-        );
-        assertFalse(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[1])
-        );
+        // Verify deauthorizations
+        assertFalse(factory.isUserAuthorized(tokensToAuth[0], userA));
+        assertFalse(factory.isUserAuthorized(tokensToAuth[0], userB));
+        assertTrue(factory.isUserAuthorized(tokensToAuth[1], userA));
+        assertTrue(factory.isUserAuthorized(tokensToAuth[1], userB));
+
+        // Test authorization for non-existent user
+        assertFalse(factory.isUserAuthorized(tokensToAuth[0], makeAddr("nonexistent")));
 
         // Test pause and unpause
         prank(deployer);
@@ -1496,11 +1509,10 @@ contract ComplexTest is Test {
     function test_AddressRegistry_Functionality() public {
         // Test setAddress
         address newAddress = makeAddr("newContract");
-        bytes32 testId = keccak256("TEST_ID");
 
         prank(deployer);
-        registry.setAddress(testId, newAddress);
-        assertEq(registry.getAddress(testId), newAddress);
+        registry.setAddress(bytes32("TEST_ID"), newAddress);
+        assertEq(registry.getAddress(bytes32("TEST_ID")), newAddress);
 
         // Test getter functions
         assertEq(registry.getMeritManager(), address(mm));
@@ -1784,11 +1796,20 @@ contract ComplexTest is Test {
         } while (IERC20(_totemTokenAddr).balanceOf(address(distr)) > 0);
     }
 
+    // Utility function to prank as a specific user
+    function prank(address _user) internal {
+        vm.stopPrank();
+        vm.startPrank(_user);
+    }
+
+    function warp(uint256 _time) internal {
+        vm.warp(block.timestamp + _time);
+    }
+
     // Deploy all contracts
     function _deploy() internal {
         // Uni V2 deploying
         uniFactory = Deployer.deployFactory(deployer);
-        // pair = IUniswapV2Pair(uniFactory.createPair(address(tokenA), address(tokenB)));
         weth = Deployer.deployWETH();
         router = Deployer.deployRouterV2(address(uniFactory), address(weth));
 
@@ -1887,15 +1908,5 @@ contract ComplexTest is Test {
 
         mm.grantRole(mm.REGISTRATOR(), address(distr));
         mm.grantRole(mm.REGISTRATOR(), address(factory));
-    }
-
-    // Utility function to prank as a specific user
-    function prank(address _user) internal {
-        vm.stopPrank();
-        vm.startPrank(_user);
-    }
-
-    function warp(uint256 _time) internal {
-        vm.warp(block.timestamp + _time);
     }
 }
