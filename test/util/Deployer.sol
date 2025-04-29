@@ -27,7 +27,7 @@ library Deployer {
     }
 
     function deployWETH() internal returns (WETH weth) {
-        bytes memory bytecode = abi.encodePacked(vm.getCode("WETH.sol:WETH"), "");
+        bytes memory bytecode = abi.encodePacked(vm.getCode("WETH9.sol:WETH9"), "");
         assembly {
             weth := create(0, add(bytecode, 32), mload(bytecode))
         }
