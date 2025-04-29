@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+
 import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {ConfirmedOwner} from "@chainlink/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
 
-contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner {
+contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
     using FunctionsRequest for FunctionsRequest.Request;
 
     bytes32 public lastRequestId;
@@ -20,6 +22,7 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner {
     mapping(address => TokenInfo) public tokenHolders;
 
     bytes32 public constant donId = 0x66756e2d736f6e6569756d2d6d61696e6e65742d310000000000000000000000;
+    bytes32 public constant CALLER_ROLE = keccak256("CALLER_ROLE");
 
     string private constant source = 
         "const tokenAddress = args[0]; "
@@ -42,17 +45,20 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner {
     event HoldersCountUpdated(address indexed token, uint256 count, uint256 timestamp);
     event RequestFailed(bytes32 requestId, string reason);
 
-    constructor(address router) FunctionsClient(router) ConfirmedOwner(msg.sender) {}
+    constructor(address router) FunctionsClient(router) ConfirmedOwner(msg.sender) {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(CALLER_ROLE, msg.sender);
+    }
 
-    function setSubscriptionId(uint64 _subscriptionId) external onlyOwner {
+    function setSubscriptionId(uint64 _subscriptionId) external onlyRole(DEFAULT_ADMIN_ROLE) {
         subscriptionId = _subscriptionId;
     }
 
-    function setGasLimit(uint32 _gasLimit) external onlyOwner {
+    function setGasLimit(uint32 _gasLimit) external onlyRole(DEFAULT_ADMIN_ROLE) {
         gasLimit = _gasLimit;
     }
 
-    function requestHoldersCount(address _tokenAddress) external onlyOwner returns (bytes32 requestId) {
+    function requestHoldersCount(address _tokenAddress) external onlyRole(CALLER_ROLE) returns (bytes32 requestId) {
         lastQueriedToken = _tokenAddress;
 
         FunctionsRequest.Request memory req;
