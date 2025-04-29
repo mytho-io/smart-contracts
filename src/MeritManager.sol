@@ -120,8 +120,8 @@ contract MeritManager is
         startTime = block.timestamp; // Initially set to deployment timestamp
         accumulatedPeriods = 0;
         vestingWalletsAllocation = [
-            175_000_000 ether,
-            125_000_000 ether,
+            200_000_000 ether,
+            150_000_000 ether,
             100_000_000 ether,
             50_000_000 ether
         ];
