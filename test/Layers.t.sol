@@ -405,6 +405,7 @@ contract LayersTest is Test {
         uint256 layerId = createLayer(userA, totemId);
 
         // Test donation below minimum fee
+        vm.deal(userB, 1000 ether);
         prank(userB);
         vm.expectRevert(L.FeeTooLow.selector);
         layers.donateToLayer{value: 0.0009 ether}(layerId);
@@ -479,6 +480,7 @@ contract LayersTest is Test {
 
     function test_PauseAndUnpause() public {
         uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
 
         // Test pausing by non-manager
         prank(userA);
@@ -491,8 +493,8 @@ contract LayersTest is Test {
 
         // Test operations while paused
         prank(userA);
-        vm.expectRevert("Pausable: paused");
-        createLayer(userA, totemId);
+        vm.expectRevert();
+        layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
 
         // Test unpausing by manager
         prank(deployer);

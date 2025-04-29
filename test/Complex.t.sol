@@ -79,6 +79,17 @@ contract ComplexTest is Test {
         _deploy();
     }
 
+    function test_MythumPeriod() public {
+        uint256 counter;
+        for(uint256 i = 1; i < 40; i++) {
+            bool isMythum = mm.isMythum();
+            console.log("day:", i, isMythum);
+            vm.warp(block.timestamp + 1 days);
+            if (isMythum) counter++;
+        }
+        console.log("days number:", counter);
+    }
+
     // Test totem creation and initial token distribution
     function test_TotemCreating_NewToken() public {
         uint256 initTreasuryBalanceInFeeTokens = IERC20(factory.getFeeToken())
