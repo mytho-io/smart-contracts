@@ -140,8 +140,8 @@ contract Layers is
         authorShardPercentage = 1000; // 10%
         royaltyPercentage = 1000; // 10% (1000 basis points = 10%)
         boostWindow = 24 hours; // boost window duration (24 hours)
-        minTotemTokenBalance = 250_000 ether; // min totem token balance required to create a layer
-        donationFeePercentage = 0; // 0% donation fee by default
+        minTotemTokenBalance = 1 ether; // min totem token balance required to create a layer
+        donationFeePercentage = 100; // 1% donation fee by default
         minDonationFee = 0.001 ether; // 0.001 minimum donation fee by default
 
         // Start counters from 1 so 0 can be used as "no pending layer" indicator
@@ -171,7 +171,7 @@ contract Layers is
         // Check if caller has enough totem tokens
         if (
             IERC20(totemData.totemTokenAddr).balanceOf(msg.sender) <
-            minTotemTokenBalance // 250_000 min balance by default
+            minTotemTokenBalance // 1 min balance by default
         ) revert NotEnoughTotemTokens();
 
         // Check if caller is authorized
