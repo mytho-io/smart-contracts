@@ -1,5 +1,5 @@
 [profile.default]
-# evm_version = "london"
+evm_version = "london"
 src = "src"
 out = "out"
 libs = ["lib"]
@@ -8,6 +8,9 @@ fs_permissions = [
     { access = "read-write", path = "./combined" },
     { access = "read-write", path = "./out" } 
 ]
+
+# Increase gas limit for tests
+gas_limit = 3000000000
 
 unchecked_cheatcode_artifacts = true
 
@@ -21,6 +24,7 @@ minato = "${MINATO_RPC_URL}"
 shibuya = "${SHIBUYA_RPC_URL}"
 soneium = "${SONEIUM_RPC_URL}"
 ethereum = "${ETHEREUM_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
 
 [fuzz]
 runs = 1000
