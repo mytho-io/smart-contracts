@@ -122,14 +122,14 @@ contract BurnMintMYTHO is
     /**
      * @notice Pauses all token transfers
      */
-    function pause() public onlyOwner {
+    function pause() external onlyOwner {
         _pause();
     }
 
     /**
      * @notice Unpauses all token transfers
      */
-    function unpause() public onlyOwner {
+    function unpause() external onlyOwner {
         _unpause();
     }
 
@@ -197,7 +197,7 @@ contract BurnMintMYTHO is
      * @notice Returns all permissioned minters
      * @return Array of minter addresses
      */
-    function getMinters() public view returns (address[] memory) {
+    function getMinters() external view returns (address[] memory) {
         return s_minters.values();
     }
 
@@ -205,7 +205,7 @@ contract BurnMintMYTHO is
      * @notice Returns all permissioned burners
      * @return Array of burner addresses
      */
-    function getBurners() public view returns (address[] memory) {
+    function getBurners() external view returns (address[] memory) {
         return s_burners.values();
     }
 

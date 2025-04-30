@@ -115,7 +115,6 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         mythoToken = IERC20(AddressRegistry(_registryAddr).getMythoToken());
 
         isCustomToken = _isCustomToken;
-        salePeriodEnded = false; // Initially, sale period is active
         registryAddr = _registryAddr;
 
         // Set owner and collaborators

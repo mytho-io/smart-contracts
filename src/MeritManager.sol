@@ -118,7 +118,6 @@ contract MeritManager is
         vestingWallets = _vestingWallets;
         periodDuration = 30 days;
         startTime = block.timestamp; // Initially set to deployment timestamp
-        accumulatedPeriods = 0;
         vestingWalletsAllocation = [
             200_000_000 ether,
             150_000_000 ether,

@@ -302,14 +302,14 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     /**
      * @notice Pauses the contract
      */
-    function pause() public onlyRole(MANAGER) {
+    function pause() external onlyRole(MANAGER) {
         _pause();
     }
 
     /**
      * @notice Unpauses the contract
      */
-    function unpause() public onlyRole(MANAGER) {
+    function unpause() external onlyRole(MANAGER) {
         _unpause();
     }
 
