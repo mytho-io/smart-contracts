@@ -637,10 +637,7 @@ contract TotemTokenDistributor is
         address priceFeedAddr = priceFeedAddresses[_tokenAddr];
 
         if (priceFeedAddr == address(0)) {
-            // If no price feed is set for this token, return a default value. For test purposes
-            return 0.05 * 1e18;
-
-            // revert NoPriceFeedSet(_tokenAddr);
+            revert NoPriceFeedSet(_tokenAddr);
         }
 
         // Get the latest price from Chainlink
