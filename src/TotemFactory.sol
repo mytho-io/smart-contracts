@@ -37,6 +37,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
 
     // Mappings
     mapping(uint256 totemId => TotemData data) private totemData;
+    mapping(address totemAddr => TotemData data) private totemDataByAddress;
+    mapping(address token => mapping(address user => bool)) private authorized;
 
     // Structs
     struct TotemData {
@@ -49,30 +51,24 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
 
     // Constants - Roles
     bytes32 private constant MANAGER = keccak256("MANAGER");
-    bytes32 private constant WHITELISTED = keccak256("WHITELISTED");
 
     // Events
-    event TotemCreated(
-        address totemAddr,
-        address totemTokenAddr,
-        uint256 totemId
-    );
-    event TotemWithExistingTokenCreated(
-        address totemAddr,
-        address totemTokenAddr,
-        uint256 totemId
-    );
+    event TotemCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
+    event TotemWithExistingTokenCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address oldToken, address newToken);
     event BatchWhitelistUpdated(address[] tokens, bool isAdded);
+    event TokenAuthorizationUpdated(address indexed token, address indexed user, bool isAuthorized); // prettier-ignore
 
     // Custom errors
+    error TokenAlreadyAuthorized(address token, address user);
     error AlreadyWhitelisted(address totemTokenAddr);
     error NotWhitelisted(address totemTokenAddr);
     error ZeroAddress();
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
     error EcosystemPaused();
+    error UserNotAuthorized(address user, address token);
 
     /**
      * @notice Initializes the TotemFactory contract
@@ -153,13 +149,16 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             )
         );
 
-        totemData[lastId++] = TotemData({
+        TotemData memory data = TotemData({
             creator: msg.sender,
             totemTokenAddr: address(totemToken),
             totemAddr: address(proxy),
             dataHash: _dataHash,
             isCustomToken: false
         });
+        
+        totemData[lastId++] = data;
+        totemDataByAddress[address(proxy)] = data;
 
         // register the totem and make initial tokens distribution
         totemDistributor.register();
@@ -182,12 +181,14 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         if (_dataHash.length == 0) {
             revert InvalidTotemParameters("Empty dataHash");
         }
+        if (_tokenAddr == address(0)) revert ZeroAddress();
 
         // Collect fee in ASTR tokens
         _collectFee(msg.sender);
 
-        if (!hasRole(WHITELISTED, _tokenAddr))
-            revert NotWhitelisted(_tokenAddr);
+        // Check if user is authorized to create totem with this token
+        if (!authorized[_tokenAddr][msg.sender])
+            revert UserNotAuthorized(msg.sender, _tokenAddr);
 
         BeaconProxy proxy = new BeaconProxy(
             beaconAddr,
@@ -202,13 +203,16 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             )
         );
 
-        totemData[lastId++] = TotemData({
+        TotemData memory data = TotemData({
             creator: msg.sender,
             totemTokenAddr: _tokenAddr,
             totemAddr: address(proxy),
             dataHash: _dataHash,
             isCustomToken: true
         });
+        
+        totemData[lastId++] = data;
+        totemDataByAddress[address(proxy)] = data;
 
         MeritManager(meritManagerAddr).register(address(proxy));
 
@@ -244,61 +248,55 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @notice Adds multiple tokens to the whitelist
-     * @param _tokens Array of token addresses to whitelist
+     * @notice Authorizes users for a token
+     * @param _token The token address
+     * @param _users Array of user addresses to authorize
      */
-    function batchAddToWhitelist(
-        address[] calldata _tokens
-    ) external onlyRole(MANAGER) {
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            if (!hasRole(WHITELISTED, _tokens[i])) {
-                grantRole(WHITELISTED, _tokens[i]);
+    function authorizeUsers(
+        address _token,
+        address[] calldata _users
+    ) public onlyRole(MANAGER) {
+        if (_token == address(0)) revert ZeroAddress();
+
+        for (uint256 i = 0; i < _users.length; i++) {
+            if (_users[i] != address(0)) {
+                if (authorized[_token][_users[i]]) 
+                    revert TokenAlreadyAuthorized(_token, _users[i]);
+                
+                authorized[_token][_users[i]] = true;
+                emit TokenAuthorizationUpdated(_token, _users[i], true);
             }
         }
-
-        emit BatchWhitelistUpdated(_tokens, true);
     }
 
     /**
-     * @notice Removes multiple tokens from the whitelist
-     * @param _tokens Array of token addresses to remove from whitelist
+     * @notice Removes authorization from users for a token
+     * @param _token The token address
+     * @param _users Array of user addresses to deauthorize
      */
-    function batchRemoveFromWhitelist(
-        address[] calldata _tokens
-    ) external onlyRole(MANAGER) {
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            if (hasRole(WHITELISTED, _tokens[i])) {
-                revokeRole(WHITELISTED, _tokens[i]);
+    function deauthorizeUsers(
+        address _token,
+        address[] calldata _users
+    ) public onlyRole(MANAGER) {
+        for (uint256 i = 0; i < _users.length; i++) {
+            if (_users[i] != address(0)) {
+                authorized[_token][_users[i]] = false;
+                emit TokenAuthorizationUpdated(_token, _users[i], false);
             }
         }
-
-        emit BatchWhitelistUpdated(_tokens, false);
     }
 
     /**
-     * @notice Adds a single token to the whitelist
-     * @param _token The token address to whitelist
+     * @notice Checks if a user is authorized for a token
+     * @param _token The token address
+     * @param _user The user address
+     * @return Whether the user is authorized
      */
-    function addTokenToWhitelist(address _token) public onlyRole(MANAGER) {
-        if (hasRole(WHITELISTED, _token)) revert AlreadyWhitelisted(_token);
-        grantRole(WHITELISTED, _token);
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = _token;
-        emit BatchWhitelistUpdated(tokens, true);
-    }
-
-    /**
-     * @notice Removes a single token from the whitelist
-     * @param _token The token address to remove from whitelist
-     */
-    function removeTokenFromWhitelist(address _token) public onlyRole(MANAGER) {
-        if (!hasRole(WHITELISTED, _token)) revert NotWhitelisted(_token);
-        revokeRole(WHITELISTED, _token);
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = _token;
-        emit BatchWhitelistUpdated(tokens, false);
+    function isUserAuthorized(
+        address _token,
+        address _user
+    ) external view returns (bool) {
+        return authorized[_token][_user];
     }
 
     /**
@@ -378,6 +376,19 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     ) external view returns (TotemData memory) {
         TotemData memory data = totemData[_totemId];
         if (data.totemAddr == address(0)) revert TotemNotFound(_totemId);
+        return data;
+    }
+
+    /**
+     * @notice Gets data for a specific totem by address
+     * @param _totemAddr The address of the totem
+     * @return The totem data structure
+     */
+    function getTotemDataByAddress(
+        address _totemAddr
+    ) external view returns (TotemData memory) {
+        TotemData memory data = totemDataByAddress[_totemAddr];
+        if (data.totemAddr == address(0)) revert TotemNotFound(0);
         return data;
     }
 }

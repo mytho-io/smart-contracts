@@ -142,7 +142,8 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(
             abi.encodeWithSelector(
-                TF.NotWhitelisted.selector,
+                TF.UserNotAuthorized.selector,
+                userA,
                 address(customToken)
             )
         );
@@ -152,11 +153,12 @@ contract ComplexTest is Test {
             new address[](0)
         );
 
+        // Authorize user
         prank(deployer);
-        factory.addTokenToWhitelist(address(customToken));
-        assertTrue(
-            factory.hasRole(keccak256("WHITELISTED"), address(customToken))
-        );
+        address[] memory users = new address[](1);
+        users[0] = userA;
+        factory.authorizeUsers(address(customToken), users);
+        assertTrue(factory.isUserAuthorized(address(customToken), userA));
 
         prank(userA);
         factory.createTotemWithExistingToken(
@@ -169,6 +171,14 @@ contract ComplexTest is Test {
         assertTrue(data.isCustomToken);
         assertEq(data.totemTokenAddr, address(customToken));
         assertEq(data.creator, userA);
+
+        // Check data by address
+        TF.TotemData memory dataByAddr = factory.getTotemDataByAddress(
+            data.totemAddr
+        );
+        assertEq(dataByAddr.totemTokenAddr, data.totemTokenAddr);
+        assertEq(dataByAddr.creator, data.creator);
+        assertEq(dataByAddr.totemAddr, data.totemAddr);
 
         // check if new totem not registered in TotemTokenDistributor
         TTD.TotemData memory ttdData = distr.getTotemData(data.totemTokenAddr);
@@ -717,14 +727,16 @@ contract ComplexTest is Test {
         // Create a custom token and whitelist it
         MockToken customToken = new MockToken();
         customToken.mint(deployer, 1_000_000 ether);
-        
+
         prank(deployer);
-        factory.addTokenToWhitelist(address(customToken));
-        
+        address[] memory users = new address[](1);
+        users[0] = userA;
+        factory.authorizeUsers(address(customToken), users);
+
         // Transfer tokens to userA for creation fee and custom token
         prank(deployer);
         customToken.transfer(userA, 500_000 ether);
-        
+
         // Create totem with custom token
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
@@ -733,48 +745,52 @@ contract ComplexTest is Test {
             address(customToken),
             new address[](0)
         );
-        
+
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
-        
+
         // Verify it's a custom token totem
         assertTrue(totem.isCustomTotemToken());
         assertEq(data.totemTokenAddr, address(customToken));
-        
+
         // Credit merit and move to next period to get MYTHO
         prank(deployer);
         mm.creditMerit(data.totemAddr, 1000);
-        
+
         warp(31 days);
         mm.updateState();
-        
+
         prank(address(totem));
         totem.collectMYTH(0);
-        
+
         // Get initial balances
         uint256 initialMythoBalance = mytho.balanceOf(data.totemAddr);
         uint256 initialPaymentBalance = paymentToken.balanceOf(data.totemAddr);
-        uint256 initialTreasuryCustomTokenBalance = customToken.balanceOf(address(treasury));
-        
+        uint256 initialTreasuryCustomTokenBalance = customToken.balanceOf(
+            address(treasury)
+        );
+
         // User burns custom tokens
         uint256 burnAmount = 10_000 ether;
 
         uint256 initialUserPaymentBalance = paymentToken.balanceOf(userA);
-        
+
         prank(userA);
         customToken.approve(data.totemAddr, burnAmount);
         totem.burnTotemTokens(burnAmount);
-        
+
         // Verify custom tokens were transferred to treasury (not burned)
         assertEq(
             customToken.balanceOf(address(treasury)),
             initialTreasuryCustomTokenBalance + burnAmount
         );
-        
+
         // Calculate expected proportions
         uint256 circulatingSupply = totem.getCirculatingSupply();
-        uint256 expectedMythoAmount = (initialMythoBalance * burnAmount) / circulatingSupply;
-        uint256 expectedPaymentAmount = (initialPaymentBalance * burnAmount) / circulatingSupply;
+        uint256 expectedMythoAmount = (initialMythoBalance * burnAmount) /
+            circulatingSupply;
+        uint256 expectedPaymentAmount = (initialPaymentBalance * burnAmount) /
+            circulatingSupply;
 
         // Verify user received proportional assets
         assertApproxEqRel(mytho.balanceOf(userA), expectedMythoAmount, 1e16);
@@ -782,7 +798,7 @@ contract ComplexTest is Test {
             paymentToken.balanceOf(userA),
             initialUserPaymentBalance + expectedPaymentAmount
         );
-        
+
         // Verify custom token total supply hasn't changed (tokens weren't burned)
         assertEq(customToken.totalSupply(), 1_000_000 ether);
     }
@@ -862,7 +878,7 @@ contract ComplexTest is Test {
 
     // Test TotemFactory error cases
     function test_TotemFactoryErrorCases() public {
-        // Test creating totem with empty parameters
+        // Test creating totem with empty parameters (empty token name, symbol, or dataHash)
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(
@@ -873,25 +889,46 @@ contract ComplexTest is Test {
         );
         factory.createTotem("", "", "", new address[](0));
 
+        // Test creating totem with empty dataHash for custom token
+        MockToken customToken = new MockToken();
+        prank(deployer);
+        address[] memory users = new address[](1);
+        users[0] = userA;
+        factory.authorizeUsers(address(customToken), users);
+        prank(userA);
+        astrToken.approve(address(factory), factory.getCreationFee());
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TF.InvalidTotemParameters.selector,
+                "Empty dataHash"
+            )
+        );
+        factory.createTotemWithExistingToken(
+            "",
+            address(customToken),
+            new address[](0)
+        );
+
         // Test creating totem with insufficient fee
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee() - 1);
         vm.expectRevert();
         factory.createTotem("dataHash", "Token", "TKN", new address[](0));
 
-        // Test creating totem with custom token not whitelisted
-        MockToken customToken = new MockToken();
+        // Test creating totem with custom token not authorized
+        MockToken notAuthToken = new MockToken();
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(
             abi.encodeWithSelector(
-                TF.NotWhitelisted.selector,
-                address(customToken)
+                TF.UserNotAuthorized.selector,
+                userA,
+                address(notAuthToken)
             )
         );
         factory.createTotemWithExistingToken(
             "dataHash",
-            address(customToken),
+            address(notAuthToken),
             new address[](0)
         );
 
@@ -902,38 +939,81 @@ contract ComplexTest is Test {
 
     // Test Treasury functionality
     function test_TreasuryFunctionality() public {
-        address recipient = makeAddr("recipient");
-
         // Test withdrawing ERC20 tokens
         prank(deployer);
         paymentToken.mint(address(treasury), 1000 ether);
 
+        // Only MANAGER can withdraw
+        prank(userA);
+        vm.expectRevert();
+        treasury.withdrawERC20(address(paymentToken), userA, 100 ether);
+
+        uint256 initialUserABalance = paymentToken.balanceOf(userA);
+
         // Withdraw half the tokens
         prank(deployer);
-        treasury.withdrawERC20(address(paymentToken), recipient, 500 ether);
+        treasury.withdrawERC20(address(paymentToken), userA, 500 ether);
 
         // Verify balances
-        assertEq(paymentToken.balanceOf(recipient), 500 ether);
+        assertEq(paymentToken.balanceOf(userA), initialUserABalance + 500 ether);
         assertEq(paymentToken.balanceOf(address(treasury)), 500 ether);
+
+        // Test error: withdraw to zero address
+        prank(deployer);
+        vm.expectRevert(Treasury.ZeroAddress.selector);
+        treasury.withdrawERC20(address(paymentToken), address(0), 100 ether);
+
+        // Test error: withdraw zero amount
+        prank(deployer);
+        vm.expectRevert(Treasury.ZeroAmount.selector);
+        treasury.withdrawERC20(address(paymentToken), userA, 0);
+
+        // Test error: withdraw more than available
+        prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Treasury.InsufficientBalance.selector,
+                1000 ether,
+                500 ether
+            )
+        );
+        treasury.withdrawERC20(address(paymentToken), userA, 1000 ether);
 
         // Test withdrawing native tokens
         vm.deal(address(treasury), 2 ether);
 
+        // Only MANAGER can withdraw native
+        prank(userA);
+        vm.expectRevert();
+        treasury.withdrawNative(payable(userA), 1 ether);
+
         prank(deployer);
-        treasury.withdrawNative(payable(recipient), 1 ether);
+        treasury.withdrawNative(payable(userA), 1 ether);
 
         // Verify balances
-        assertEq(recipient.balance, 1 ether);
+        assertEq(userA.balance, 1 ether);
         assertEq(address(treasury).balance, 1 ether);
 
-        // Test error cases
+        // Test error: withdraw to zero address native
         prank(deployer);
-        vm.expectRevert();
-        treasury.withdrawERC20(address(paymentToken), recipient, 1000 ether); // More than available
+        vm.expectRevert(Treasury.ZeroAddress.selector);
+        treasury.withdrawNative(payable(address(0)), 1 ether);
 
+        // Test error: withdraw zero amount native
         prank(deployer);
-        vm.expectRevert();
-        treasury.withdrawNative(payable(recipient), 2 ether); // More than available
+        vm.expectRevert(Treasury.ZeroAmount.selector);
+        treasury.withdrawNative(payable(userA), 0);
+
+        // Test error: withdraw more than available native
+        prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Treasury.InsufficientBalance.selector,
+                2 ether,
+                1 ether
+            )
+        );
+        treasury.withdrawNative(payable(userA), 2 ether);
 
         // Test balance getters
         assertEq(treasury.getERC20Balance(address(paymentToken)), 500 ether);
@@ -1124,182 +1204,182 @@ contract ComplexTest is Test {
     function test_PeriodDurationChange_PreservesPeriodCount() public {
         // Initial period duration is 30 days
         assertEq(mm.periodDuration(), 30 days);
-        
+
         // Initial period is 0
         assertEq(mm.currentPeriod(), 0);
-        
+
         // Warp forward 45 days (1.5 periods)
         warp(45 days);
-        
+
         // Should be in period 1
         assertEq(mm.currentPeriod(), 1);
-        
+
         // Change period duration to 15 days
         prank(deployer);
         mm.setPeriodDuration(15 days);
-        
+
         // Period count should still be 1 after the change
         assertEq(mm.currentPeriod(), 1);
         assertEq(mm.accumulatedPeriods(), 1);
-        
+
         // Warp forward 15 days (1 new period with new duration)
         warp(15 days);
-        
+
         // Should be in period 2 (1 accumulated + 1 new)
         assertEq(mm.currentPeriod(), 2);
-        
+
         // Warp forward 30 days (2 new periods with new duration)
         warp(30 days);
-        
+
         // Should be in period 4 (1 accumulated + 3 new)
         assertEq(mm.currentPeriod(), 4);
     }
-    
+
     // Test period duration change with multiple changes
     function test_MultiplePeriodDurationChanges() public {
         // Initial period duration is 30 days
         assertEq(mm.periodDuration(), 30 days);
-        
+
         // Warp forward 60 days (2 periods)
         warp(60 days);
-        
+
         // Should be in period 2
         assertEq(mm.currentPeriod(), 2);
-        
+
         // Change period duration to 15 days
         prank(deployer);
         mm.setPeriodDuration(15 days);
-        
+
         // Period count should still be 2 after the change
         assertEq(mm.currentPeriod(), 2);
         assertEq(mm.accumulatedPeriods(), 2);
-        
+
         // Warp forward 30 days (2 new periods with new duration)
         warp(30 days);
-        
+
         // Should be in period 4 (2 accumulated + 2 new)
         assertEq(mm.currentPeriod(), 4);
-        
+
         // Change period duration again to 10 days
         prank(deployer);
         mm.setPeriodDuration(10 days);
-        
+
         // Period count should still be 4 after the change
         assertEq(mm.currentPeriod(), 4);
         assertEq(mm.accumulatedPeriods(), 4);
-        
+
         // Warp forward 20 days (2 new periods with new duration)
         warp(20 days);
-        
+
         // Should be in period 6 (4 accumulated + 2 new)
         assertEq(mm.currentPeriod(), 6);
     }
-    
+
     // Test period time bounds calculation after period duration change
     function test_PeriodTimeBoundsAfterDurationChange() public {
         // Initial period duration is 30 days
         assertEq(mm.periodDuration(), 30 days);
-        
+
         // Warp forward 30 days (1 period)
         warp(30 days);
-        
+
         // Should be in period 1
         assertEq(mm.currentPeriod(), 1);
-        
+
         // Change period duration to 15 days
         uint256 changeTimestamp = block.timestamp;
         prank(deployer);
         mm.setPeriodDuration(15 days);
-        
+
         // Get time bounds for period 1 (should return 0,0 as it's before accumulated periods)
         (uint256 startTime1, uint256 endTime1) = mm.getPeriodTimeBounds(0);
         assertEq(startTime1, 0);
         assertEq(endTime1, 0);
-        
+
         // Get time bounds for period 2 (first period after the change)
         (uint256 startTime2, uint256 endTime2) = mm.getPeriodTimeBounds(2);
         assertEq(startTime2, changeTimestamp + 15 days);
         assertEq(endTime2, changeTimestamp + 30 days);
     }
-    
+
     // Test Mythum period calculation after period duration change
     function test_MythumPeriodAfterDurationChange() public {
         // Initial period duration is 30 days
         assertEq(mm.periodDuration(), 30 days);
-        
+
         // Warp forward 30 days (1 period)
         warp(30 days);
-        
+
         // Change period duration to 20 days
         prank(deployer);
         mm.setPeriodDuration(20 days);
-        
+
         // Warp to just before Mythum period in the new period
         warp(14 days); // 30 + 14 = 44 days total, new period starts at 30 days
-        
+
         // Should not be in Mythum period yet
         assertFalse(mm.isMythum());
-        
+
         // Warp to Mythum period (last 25% of period = last 5 days of 20-day period)
         warp(1 days); // 45 days total, Mythum starts at 45 days (30 + 15)
-        
+
         // Should be in Mythum period
         assertTrue(mm.isMythum());
-        
+
         // Verify Mythum start time
         uint256 mythumStart = mm.getCurrentMythumStart();
         assertEq(mythumStart, mm.startTime() + 15 days); // 3/4 of the new 20-day period
     }
-    
+
     // Test merit crediting and claiming across period duration changes
     function test_MeritAndClaimAcrossPeriodChanges() public {
         address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
-        
+
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Credit merit in period 0
         prank(deployer);
         mm.creditMerit(data.totemAddr, 1000);
-        
+
         // Warp to period 1
         warp(30 days);
         mm.updateState();
-        
+
         // Claim MYTHO for period 0
         uint256 mythoBefore = mytho.balanceOf(data.totemAddr);
         prank(address(totem));
         totem.collectMYTH(0);
         uint256 mythoAfterFirstClaim = mytho.balanceOf(data.totemAddr);
         assertTrue(mythoAfterFirstClaim > mythoBefore);
-        
+
         // Credit merit in period 1
         prank(deployer);
         mm.creditMerit(data.totemAddr, 2000);
-        
+
         // Change period duration to 15 days
         prank(deployer);
         mm.setPeriodDuration(15 days);
-        
+
         // Warp to period 3 (1 accumulated + 2 new periods)
         warp(30 days);
         mm.updateState();
-        
+
         // Claim MYTHO for period 1
         prank(address(totem));
         totem.collectMYTH(1);
         uint256 mythoAfterSecondClaim = mytho.balanceOf(data.totemAddr);
         assertTrue(mythoAfterSecondClaim > mythoAfterFirstClaim);
-        
+
         // Credit merit in period 3
         prank(deployer);
         mm.creditMerit(data.totemAddr, 3000);
-        
+
         // Warp to period 4
         warp(15 days);
         mm.updateState();
-        
+
         // Claim MYTHO for period 3
         prank(address(totem));
         totem.collectMYTH(3);
@@ -1310,157 +1390,164 @@ contract ComplexTest is Test {
     // Test pause functionality in TotemTokenDistributor
     function test_TotemTokenDistributor_PauseFunctionality() public {
         address totemTokenAddr = _createTotem(userA);
-        
+
         // Test pause functionality
         prank(deployer);
         distr.pause();
-        
+
         // Verify buying is blocked when paused
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         distr.buy(totemTokenAddr, 100 ether);
-        
+
         // Verify selling is blocked when paused
         prank(userA);
         IERC20(totemTokenAddr).approve(address(distr), 100 ether);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         distr.sell(totemTokenAddr, 100 ether);
-        
+
         // Verify registration is blocked when paused
         prank(address(factory));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         distr.register();
-        
+
         // Unpause and verify operations work again
         prank(deployer);
         distr.unpause();
-        
+
         // Buy should work after unpausing
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
         distr.buy(totemTokenAddr, 100 ether);
-        
+
         // Verify access control for pause/unpause
         prank(userA);
         vm.expectRevert();
         distr.pause();
-        
+
         prank(userA);
         vm.expectRevert();
         distr.unpause();
     }
-    
+
     // Test pause functionality in MeritManager
     function test_MeritManager_PauseFunctionality() public {
         address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
-        
+
         // End sale period to allow transfers
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Warp to Mythus period (last 25% of period)
         warp(23 days);
-        
+
         // Test pause functionality
         prank(deployer);
         mm.pause();
-        
+
         // Verify boostTotem is blocked when paused
         vm.deal(userA, 1 ether);
         prank(userA);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
+
         // Verify register is blocked when paused
         address newTotem = makeAddr("newTotem");
         prank(address(distr));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         mm.register(newTotem);
-        
+
         // Verify claimMytho is blocked when paused
         prank(address(data.totemAddr));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         mm.claimMytho(0);
-        
+
         // Unpause and verify operations work again
         prank(deployer);
         mm.unpause();
-        
+
         // Boost should work after unpausing
         vm.deal(userA, 1 ether);
         prank(userA);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
+
         // Verify access control for pause/unpause
         prank(userA);
         vm.expectRevert();
         mm.pause();
-        
+
         prank(userA);
         vm.expectRevert();
         mm.unpause();
     }
-    
+
     // Test TotemFactory admin functions
     function test_TotemFactory_AdminFunctions() public {
-        // Test setCreationFee
+        // setCreationFee: only MANAGER
+        prank(userA);
+        vm.expectRevert();
+        factory.setCreationFee(2 ether);
         prank(deployer);
         factory.setCreationFee(2 ether);
         assertEq(factory.getCreationFee(), 2 ether);
 
-        // Test setFeeToken
+        // setFeeToken: only MANAGER
         MockToken newFeeToken = new MockToken();
         newFeeToken.mint(userA, 100 ether);
-
+        prank(userA);
+        vm.expectRevert();
+        factory.setFeeToken(address(newFeeToken));
         prank(deployer);
         factory.setFeeToken(address(newFeeToken));
         assertEq(factory.getFeeToken(), address(newFeeToken));
 
-        // Test batchAddToWhitelist
-        address[] memory tokensToWhitelist = new address[](2);
-        tokensToWhitelist[0] = makeAddr("token1");
-        tokensToWhitelist[1] = makeAddr("token2");
-
+        // authorizeUsers: only MANAGER, zero address, already authorized
+        address[] memory usersToAuth = new address[](2);
+        usersToAuth[0] = userA;
+        usersToAuth[1] = userB;
+        prank(userA);
+        vm.expectRevert();
+        factory.authorizeUsers(address(newFeeToken), usersToAuth);
         prank(deployer);
-        factory.batchAddToWhitelist(tokensToWhitelist);
-
-        assertTrue(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[0])
-        );
-        assertTrue(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[1])
-        );
-
-        // Test batchRemoveFromWhitelist
+        factory.authorizeUsers(address(newFeeToken), usersToAuth);
+        assertTrue(factory.isUserAuthorized(address(newFeeToken), userA));
+        assertTrue(factory.isUserAuthorized(address(newFeeToken), userB));
         prank(deployer);
-        factory.batchRemoveFromWhitelist(tokensToWhitelist);
-
-        assertFalse(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[0])
+        vm.expectRevert(TF.ZeroAddress.selector);
+        factory.authorizeUsers(address(0), usersToAuth);
+        prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TF.TokenAlreadyAuthorized.selector,
+                address(newFeeToken),
+                userA
+            )
         );
-        assertFalse(
-            factory.hasRole(keccak256("WHITELISTED"), tokensToWhitelist[1])
-        );
+        factory.authorizeUsers(address(newFeeToken), usersToAuth);
 
-        // Test pause and unpause
+        // deauthorizeUsers: only MANAGER
+        prank(userA);
+        vm.expectRevert();
+        factory.deauthorizeUsers(address(newFeeToken), usersToAuth);
+        prank(deployer);
+        factory.deauthorizeUsers(address(newFeeToken), usersToAuth);
+        assertFalse(factory.isUserAuthorized(address(newFeeToken), userA));
+        assertFalse(factory.isUserAuthorized(address(newFeeToken), userB));
+
+        // pause/unpause: only MANAGER
+        prank(userA);
+        vm.expectRevert();
+        factory.pause();
         prank(deployer);
         factory.pause();
-
+        assertTrue(factory.paused());
         prank(userA);
-        IERC20(factory.getFeeToken()).approve(
-            address(factory),
-            factory.getCreationFee()
-        );
         vm.expectRevert();
-        factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
-
+        factory.unpause();
         prank(deployer);
         factory.unpause();
-
-        prank(userA);
-        factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
-        assertEq(factory.getLastId(), 1);
+        assertFalse(factory.paused());
     }
 
     // Test TotemTokenDistributor admin functions
@@ -1509,119 +1596,134 @@ contract ComplexTest is Test {
         assertEq(registry.getTotemFactory(), address(factory));
         assertEq(registry.getTotemTokenDistributor(), address(distr));
     }
-    
+
     // Test ecosystem pause functionality
     function test_EcosystemPause_Functionality() public {
         // Create a totem for testing
         address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
-        
+
         // Verify initial state
         assertFalse(registry.isEcosystemPaused());
-        
+
         // Pause the ecosystem
         prank(deployer);
         registry.setEcosystemPaused(true);
-        
+
         // Verify ecosystem is paused
         assertTrue(registry.isEcosystemPaused());
-        
+
         // Test access control for ecosystem pause
         prank(userA);
         vm.expectRevert();
         registry.setEcosystemPaused(false);
-        
+
         // Verify MeritManager respects ecosystem pause
         vm.deal(userA, 1 ether);
         prank(userA);
         vm.expectRevert(MM.EcosystemPaused.selector);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
+
         // Verify TotemTokenDistributor respects ecosystem pause
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
         vm.expectRevert(TTD.EcosystemPaused.selector);
         distr.buy(totemTokenAddr, 100 ether);
-        
+
         // Verify TotemFactory respects ecosystem pause
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(TF.EcosystemPaused.selector);
-        factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
-        
+        factory.createTotem(
+            "dataHash2",
+            "TotemToken2",
+            "TT2",
+            new address[](0)
+        );
+
         // Verify Totem respects ecosystem pause
         prank(userA);
         IERC20(totemTokenAddr).approve(data.totemAddr, 50 ether);
         vm.expectRevert(Totem.EcosystemPaused.selector);
         totem.burnTotemTokens(50 ether);
-        
+
         // Unpause the ecosystem
         prank(deployer);
         registry.setEcosystemPaused(false);
-        
+
         // Verify ecosystem is unpaused
         assertFalse(registry.isEcosystemPaused());
-        
+
         // Verify operations work again after unpausing
-        
+
         // TotemTokenDistributor operation should work
         prank(userB);
         paymentToken.approve(address(distr), 100 ether);
         distr.buy(totemTokenAddr, 100 ether);
-        
+
         // TotemFactory operation should work
         prank(userB);
         astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotem("dataHash2", "TotemToken2", "TT2", new address[](0));
-        
+        factory.createTotem(
+            "dataHash2",
+            "TotemToken2",
+            "TT2",
+            new address[](0)
+        );
+
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Totem operation should work
         prank(userA);
         IERC20(totemTokenAddr).approve(data.totemAddr, 50 ether);
         totem.burnTotemTokens(50 ether);
     }
-    
+
     // Test interaction between contract-specific pause and ecosystem pause
     function test_ContractPause_And_EcosystemPause_Interaction() public {
         // Create a totem for testing
         address totemTokenAddr = _createTotem(userA);
-        
+
         // Pause only TotemTokenDistributor
         prank(deployer);
         distr.pause();
-        
+
         // Verify TotemTokenDistributor operations are blocked
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         distr.buy(totemTokenAddr, 100 ether);
-        
+
         // Now pause the ecosystem
         prank(deployer);
         registry.setEcosystemPaused(true);
-        
+
         // Verify all contracts are blocked
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.expectRevert(TF.EcosystemPaused.selector);
-        factory.createTotem("dataHash3", "TotemToken3", "TT3", new address[](0));
-        
+        factory.createTotem(
+            "dataHash3",
+            "TotemToken3",
+            "TT3",
+            new address[](0)
+        );
+
         // Unpause TotemTokenDistributor but keep ecosystem paused
         prank(deployer);
         distr.unpause();
-        
+
         // Verify TotemTokenDistributor is still blocked due to ecosystem pause
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
         vm.expectRevert(TTD.EcosystemPaused.selector);
         distr.buy(totemTokenAddr, 100 ether);
-        
+
         // Unpause ecosystem
         prank(deployer);
         registry.setEcosystemPaused(false);
-        
+
         // Verify TotemTokenDistributor now works
         prank(userA);
         paymentToken.approve(address(distr), 100 ether);
@@ -1634,82 +1736,87 @@ contract ComplexTest is Test {
         address totemToken1 = _createTotem(userA);
         address totemToken2 = _createTotem(userB);
         address totemToken3 = _createTotem(userC);
-        
+
         TF.TotemData memory data1 = factory.getTotemData(0);
         TF.TotemData memory data2 = factory.getTotemData(1);
         TF.TotemData memory data3 = factory.getTotemData(2);
-        
+
         Totem totem1 = Totem(data1.totemAddr);
         Totem totem2 = Totem(data2.totemAddr);
         Totem totem3 = Totem(data3.totemAddr);
-        
+
         // End sale period for all totems to allow burning tokens
         _buyAllTotemTokens(totemToken1);
         _buyAllTotemTokens(totemToken2);
         _buyAllTotemTokens(totemToken3);
-        
+
         // Verify initial state
         assertFalse(registry.areTotemsPaused());
-        
+
         // Test access control: non-manager should fail
         prank(userA);
         vm.expectRevert();
         registry.setTotemsPaused(true);
-        
+
         // Pause all totems at once
         prank(deployer);
         registry.setTotemsPaused(true);
-        
+
         // Verify totems are paused
         assertTrue(registry.areTotemsPaused());
-        
+
         // Verify operations on first totem are blocked when totems are paused
         prank(userA);
         IERC20(totemToken1).approve(data1.totemAddr, 50 ether);
         vm.expectRevert(Totem.TotemsPaused.selector);
         totem1.burnTotemTokens(50 ether);
-        
+
         // Verify operations on second totem are blocked when totems are paused
         prank(userB);
         IERC20(totemToken2).approve(data2.totemAddr, 50 ether);
         vm.expectRevert(Totem.TotemsPaused.selector);
         totem2.burnTotemTokens(50 ether);
-        
+
         // Verify operations on third totem are blocked when totems are paused
         prank(userC);
         IERC20(totemToken3).approve(data3.totemAddr, 50 ether);
         vm.expectRevert(Totem.TotemsPaused.selector);
         totem3.burnTotemTokens(50 ether);
-        
+
         // Verify other contracts still work (not affected by totems pause)
         // Create a new totem to verify factory still works
         prank(userA);
         astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotem("dataHash4", "TotemToken4", "TT4", new address[](0));
-        
+        factory.createTotem(
+            "dataHash4",
+            "TotemToken4",
+            "TT4",
+            new address[](0)
+        );
+
         // Unpause all totems at once
         prank(deployer);
         registry.setTotemsPaused(false);
-        
+
         // Verify totems are unpaused
         assertFalse(registry.areTotemsPaused());
-        
+
         // Verify operations on first totem work again
         prank(userA);
         IERC20(totemToken1).approve(data1.totemAddr, 50 ether);
         totem1.burnTotemTokens(50 ether);
-        
+
         // Verify operations on second totem work again
         prank(userB);
         IERC20(totemToken2).approve(data2.totemAddr, 50 ether);
         totem2.burnTotemTokens(50 ether);
-        
+
         // Verify operations on third totem work again
         prank(userC);
         IERC20(totemToken3).approve(data3.totemAddr, 50 ether);
         totem3.burnTotemTokens(50 ether);
     }
-    
+
     // Test MeritManager view functions
     function test_MeritManager_ViewFunctions() public {
         address totemTokenAddr = _createTotem(userA);
@@ -1737,10 +1844,7 @@ contract ComplexTest is Test {
 
         // Test getCurrentMythumStart
         uint256 mythumStart = mm.getCurrentMythumStart();
-        assertEq(
-            mythumStart,
-            mm.startTime() + ((mm.periodDuration() * 3) / 4)
-        );
+        assertEq(mythumStart, mm.startTime() + ((mm.periodDuration() * 3) / 4));
 
         // Test isRegisteredTotem
         assertTrue(mm.isRegisteredTotem(data.totemAddr));
@@ -1836,7 +1940,13 @@ contract ComplexTest is Test {
             ""
         );
         mytho = MYTHO(address(mythoProxy));
-        mytho.initialize(address(mm), deployer, deployer, deployer, address(registry));
+        mytho.initialize(
+            address(mm),
+            deployer,
+            deployer,
+            deployer,
+            address(registry)
+        );
 
         address[4] memory vestingAddresses = [
             mytho.meritVestingYear1(),
