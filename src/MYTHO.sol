@@ -7,7 +7,6 @@ import {ERC20PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/toke
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {OwnableUpgradeable} from "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 
 /**
@@ -19,8 +18,6 @@ contract MYTHO is
     ERC20PausableUpgradeable,
     OwnableUpgradeable
 {
-    using EnumerableSet for EnumerableSet.AddressSet;
-
     // Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
 
