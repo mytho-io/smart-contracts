@@ -411,7 +411,7 @@ contract ComplexTest is Test {
         prank(deployer);
         mm.grantRole(mm.BLACKLISTED(), data.totemAddr);
         prank(userA);
-        vm.expectRevert(MM.TotemInBlocklist.selector);
+        vm.expectRevert(MM.TotemInBlacklist.selector);
         mm.boostTotem{value: 0.0001 ether}(data.totemAddr);
 
         // revoke blacklisted role from totem

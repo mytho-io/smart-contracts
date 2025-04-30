@@ -74,7 +74,7 @@ contract MeritManager is
 
     // Custom errors
     error TotemNotRegistered();
-    error TotemInBlocklist();
+    error TotemInBlacklist();
     error TotemAlreadyRegistered();
     error AlreadyBlacklisted(address totem);
     error AlreadyNotInBlacklist(address totem);
@@ -156,7 +156,7 @@ contract MeritManager is
         address _totemAddr
     ) external payable nonReentrant whenNotPaused {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
         if (!isMythum()) revert NotInMythumPeriod();
 
@@ -203,7 +203,7 @@ contract MeritManager is
     ) external nonReentrant whenNotPaused {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
+        if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlacklist();
         if (isClaimed[_periodNum][totemAddr]) revert AlreadyClaimed(_periodNum);
         if (_periodNum > currentPeriod()) revert InvalidPeriod();
 
@@ -248,7 +248,7 @@ contract MeritManager is
     ) external onlyRole(MANAGER) {
         if (_amount == 0) revert ZeroAmount();
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
 
         uint256 currentPeriod_ = currentPeriod();
 
