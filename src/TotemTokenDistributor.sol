@@ -204,7 +204,7 @@ contract TotemTokenDistributor is
     }
 
     /**
-     * @notice Buy totems for allowed payment tokens
+     * @notice Buy totem tokens for allowed payment tokens
      * @param _totemTokenAddr Address of the totem token to buy
      * @param _totemTokenAmount Amount of totem tokens to buy
      */
@@ -273,7 +273,7 @@ contract TotemTokenDistributor is
     }
 
     /**
-     * @notice Sell totems for used payment token in sale period
+     * @notice Sell totem tokens for used payment token in sale period
      * @param _totemTokenAddr Address of the totem token to sell
      * @param _totemTokenAmount Amount of totem tokens to sell
      */
