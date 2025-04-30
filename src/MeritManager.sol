@@ -396,11 +396,6 @@ contract MeritManager is
     function _updateState() private {
         uint256 yearIdx = getYearIndex();
 
-        // Check if we're still within the valid year range
-        if (yearIdx >= 4) {
-            return;
-        }
-
         VestingWallet wallet = VestingWallet(payable(vestingWallets[yearIdx]));
 
         uint256 _currentPeriod = currentPeriod();
