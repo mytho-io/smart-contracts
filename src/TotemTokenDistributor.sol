@@ -38,7 +38,7 @@ contract TotemTokenDistributor is
     // State variables - Configuration
     uint256 private oneTotemPriceInUsd;
     uint256 public maxTokensPerAddress;
-    uint256 public slippagePercentage = 50; // Default 5% slippage (50/1000)
+    uint256 public slippagePercentage = 500; // Default 5% slippage (500/10000)
 
     // State variables - Distribution shares
     uint256 public revenuePaymentTokenShare;
