@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Copyright © 2025 Mytho. All Rights Reserved.
+// Copyright 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
@@ -442,7 +442,8 @@ contract MeritManager is
             accumulatedPeriods;
         uint256 currentPeriodStart = startTime +
             (periodsAfterAccumulation * periodDuration);
-        uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
+            
+        uint256 mythumStart = currentPeriodStart + ((periodDuration * 23) / 30);
         return block.timestamp >= mythumStart;
     }
 
@@ -573,7 +574,7 @@ contract MeritManager is
             accumulatedPeriods;
         uint256 currentPeriodStart = startTime +
             (periodsAfterAccumulation * periodDuration);
-        return currentPeriodStart + ((periodDuration * 3) / 4);
+        return currentPeriodStart + ((periodDuration * 23) / 30);
     }
 
     /**
