@@ -22,6 +22,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant TOTEM_FACTORY = "TOTEM_FACTORY";
     bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR =
         "TOTEM_TOKEN_DISTRIBUTOR";
+    bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
 
     // Events
     event AddressSet(
@@ -124,6 +125,14 @@ contract AddressRegistry is AccessControlUpgradeable {
      */
     function getTotemTokenDistributor() external view returns (address) {
         return getAddress(TOTEM_TOKEN_DISTRIBUTOR);
+    }
+
+    /**
+     * @notice Gets the address of the TokenHoldersOracle contract
+     * @return Address of the TokenHoldersOracle contract
+     */
+    function getTokenHoldersOracle() external view returns (address) {
+        return getAddress(TOKEN_HOLDERS_ORACLE);
     }
 
     /**

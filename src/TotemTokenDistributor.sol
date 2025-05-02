@@ -512,7 +512,7 @@ contract TotemTokenDistributor is
         );
 
         // set payment token for Totem and close sale period
-        Totem(totems[_totemTokenAddr].totemAddr).closeSalePeriod(
+        Totem(totems[_totemTokenAddr].totemAddr).endSalePeriod(
             IERC20(_paymentTokenAddr),
             IERC20(liquidityToken)
         );

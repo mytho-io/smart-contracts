@@ -1,28 +1,36 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Copyright © 2025 Mytho. All Rights Reserved.
+// Copyright 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 import {TotemToken} from "./TotemToken.sol";
+import {TokenHoldersOracle} from "./utils/TokenHoldersOracle.sol";
 
 /**
  * @title Totem
- * @notice This contract represents a Totem in the MYTHO ecosystem, managing token burning and merit distribution
- *      Handles the lifecycle of a Totem, including token burning after sale period and merit distribution
+ * @notice This contract represents a Totem in the MYTHO ecosystem, managing token redemption and merit distribution
+ *      Handles the lifecycle of a Totem, including token redemption after sale period and merit distribution
  */
 contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
-    using SafeERC20 for TotemToken;
+
+    // Enum for token types
+    enum TokenType {
+        STANDARD,  // 0: Standard (non-custom) token
+        ERC20,     // 1: Custom ERC20 token
+        ERC721     // 2: Custom ERC721 token
+    }
 
     // State variables - Tokens
-    TotemToken private totemToken;
+    address private totemTokenAddr; // Address of the totem token (can be ERC20 or ERC721)
     IERC20 private paymentToken;
     IERC20 private liquidityToken;
     IERC20 private mythoToken;
@@ -39,14 +47,14 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     address private registryAddr;
 
     // State variables - Flags
-    bool private isCustomToken;
     bool private salePeriodEnded;
+    TokenType private tokenType;
 
     // Constants
     bytes32 private constant TOTEM_DISTRIBUTOR = keccak256("TOTEM_DISTRIBUTOR");
 
     // Events
-    event TotemTokenBurned(
+    event TotemTokenRedeemed(
         address indexed user,
         uint256 totemTokenAmount,
         uint256 paymentAmount,
@@ -65,6 +73,8 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error InvalidParams();
     error TotemsPaused();
     error EcosystemPaused();
+    error StaleOracleData();
+    error UnsupportedTokenType();
 
     /**
      * @notice Modifier to check if Totems are paused or if the ecosystem is paused in the AddressRegistry
@@ -83,20 +93,20 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @param _totemToken The address of the TotemToken or custom token
      * @param _dataHash The data hash associated with this Totem
      * @param _registryAddr Address of the AddressRegistry contract
-     * @param _isCustomToken Flag indicating if the token is custom (not burnable)
      * @param _owner The address of the Totem owner
      * @param _collaborators Array of collaborator addresses
+     * @param _tokenType Type of token (STANDARD, ERC20, ERC721)
      */
     function initialize(
-        TotemToken _totemToken,
+        address _totemToken,
         bytes memory _dataHash,
         address _registryAddr,
-        bool _isCustomToken,
         address _owner,
-        address[] memory _collaborators
+        address[] memory _collaborators,
+        uint8 _tokenType
     ) public initializer {
         if (
-            address(_totemToken) == address(0) ||
+            _totemToken == address(0) ||
             _registryAddr == address(0) ||
             _owner == address(0) ||
             _dataHash.length == 0
@@ -105,7 +115,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         __AccessControl_init();
         __ReentrancyGuard_init();
 
-        totemToken = _totemToken;
+        totemTokenAddr = _totemToken;
         dataHash = _dataHash;
 
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
@@ -113,15 +123,15 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             .getTotemTokenDistributor();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         mythoToken = IERC20(AddressRegistry(_registryAddr).getMythoToken());
-
-        isCustomToken = _isCustomToken;
+        tokenType = TokenType(_tokenType);
         registryAddr = _registryAddr;
 
-        // Set owner and collaborators
         owner = _owner;
         collaborators = _collaborators;
 
-        if (_isCustomToken) {
+        // Only set payment token if this is a standard token
+        // Custom tokens don't use the payment token from the distributor
+        if (!isCustomToken()) {
             paymentToken = IERC20(
                 TotemTokenDistributor(totemDistributorAddr).getPaymentToken()
             );
@@ -133,36 +143,98 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     // EXTERNAL FUNCTIONS
 
     /**
-     * @notice Allows TotemToken holders to burn or transfer their tokens and receive proportional shares of assets
+     * @notice Allows TotemToken holders to redeem or transfer their tokens and receive proportional shares of assets
      *      After the sale period ends, burns TotemTokens for standard tokens or transfers custom tokens to treasuryAddr.
      *      User receives proportional shares of payment tokens, MYTHO tokens, and LP tokens based on circulating supply.
-     * @param _totemTokenAmount The amount of TotemToken to burn or transfer
+     * @param _tokenAmountOrId For ERC20 tokens: the amount of tokens to burn/transfer.
+     *                         For ERC721 tokens: the ID of the NFT to transfer.
      */
-    function burnTotemTokens(uint256 _totemTokenAmount) external nonReentrant whenNotPaused {
-        if (!isCustomToken && !salePeriodEnded) revert SalePeriodNotEnded();
-        if (totemToken.balanceOf(msg.sender) < _totemTokenAmount)
-            revert InsufficientTotemBalance();
-        if (_totemTokenAmount == 0) revert ZeroAmount();
+    function redeemTotemTokens(uint256 _tokenAmountOrId) external whenNotPaused nonReentrant {
+        if (tokenType == TokenType.STANDARD && !salePeriodEnded) revert SalePeriodNotEnded();
 
-        // Check if there are MYTHO tokens to claim in the current period
-        uint256 currentPeriod = MeritManager(meritManagerAddr).currentPeriod();
-        uint256 pendingReward = MeritManager(meritManagerAddr).getPendingReward(address(this), currentPeriod);
-        if (pendingReward > 0) {
-            MeritManager(meritManagerAddr).claimMytho(currentPeriod);
+        // Handle differently based on token type
+        if (tokenType == TokenType.ERC721) {
+            // For NFT tokens - pass the NFT ID
+            _redeemNFTTokens(_tokenAmountOrId);
+        } else {
+            // For regular or ERC20 custom tokens - pass the token amount
+            _redeemERC20Tokens(_tokenAmountOrId);
         }
+    }
 
-        // Get the circulating supply using the dedicated function
+    /**
+     * @notice Internal function to handle redeeming NFT tokens
+     * @param _nftTokenId The ID of the NFT token to transfer to treasury
+     */
+    function _redeemNFTTokens(uint256 _nftTokenId) internal {
+        // Verify the user owns the NFT
+        if (IERC721(totemTokenAddr).ownerOf(_nftTokenId) != msg.sender)
+            revert InsufficientTotemBalance();
+
+        TokenHoldersOracle oracle = TokenHoldersOracle(AddressRegistry(registryAddr).getTokenHoldersOracle());
+
+        // Verify data is not stale using the oracle's isDataFresh function
+        if (!oracle.isDataFresh(totemTokenAddr)) revert StaleOracleData();
+
+        // Get circulating supply
         uint256 circulatingSupply = getCirculatingSupply();
         if (circulatingSupply == 0) revert ZeroCirculatingSupply();
 
-        // Check balances of all token types
-        uint256 paymentTokenBalance = address(paymentToken) != address(0)
-            ? paymentToken.balanceOf(address(this))
-            : 0;
-        uint256 mythoBalance = mythoToken.balanceOf(address(this));
-        uint256 lpBalance = address(liquidityToken) != address(0)
-            ? liquidityToken.balanceOf(address(this))
-            : 0;
+        // Get balances to distribute
+        (
+            ,
+            ,
+            ,
+            uint256 mythoBalance
+        ) = getAllBalances();
+
+        // Check if there's MYTHO to distribute
+        if (mythoBalance == 0) {
+            revert NothingToDistribute();
+        }
+
+        // Calculate user share based on circulating supply (1 NFT = 1 token)
+        uint256 mythoAmount = mythoBalance / circulatingSupply;
+
+        // Transfer NFT to treasury
+        IERC721(totemTokenAddr).transferFrom(
+            msg.sender,
+            treasuryAddr,
+            _nftTokenId
+        );
+
+        // Transfer MYTHO tokens to user
+        mythoToken.safeTransfer(msg.sender, mythoAmount);
+
+        emit TotemTokenRedeemed(
+            msg.sender,
+            1, // For NFTs, we consider it as 1 token
+            0, // No payment tokens for NFT totems
+            mythoAmount,
+            0  // No LP tokens for NFT totems
+        );
+    }
+
+    /**
+     * @notice Internal function to handle redeeming ERC20 tokens
+     * @param _tokenAmount The amount of ERC20 tokens to redeem
+     */
+    function _redeemERC20Tokens(uint256 _tokenAmount) internal {
+        if (IERC20(totemTokenAddr).balanceOf(msg.sender) < _tokenAmount)
+            revert InsufficientTotemBalance();
+        if (_tokenAmount == 0) revert ZeroAmount();
+
+        // Get circulating supply
+        uint256 circulatingSupply = getCirculatingSupply();
+        if (circulatingSupply == 0) revert ZeroCirculatingSupply();
+
+        // Get balances to distribute
+        (
+            ,
+            uint256 paymentTokenBalance,
+            uint256 lpBalance,
+            uint256 mythoBalance
+        ) = getAllBalances();
 
         // Check if all balances are zero
         if (paymentTokenBalance == 0 && mythoBalance == 0 && lpBalance == 0) {
@@ -170,29 +242,26 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
 
         // Calculate user share for each token type based on circulating supply
-        uint256 paymentAmount = (paymentTokenBalance * _totemTokenAmount) /
+        uint256 paymentAmount = (paymentTokenBalance * _tokenAmount) /
             circulatingSupply;
-        uint256 mythoAmount = (mythoBalance * _totemTokenAmount) /
-            circulatingSupply;
-        uint256 lpAmount = (lpBalance * _totemTokenAmount) / circulatingSupply;
+        uint256 mythoAmount = (mythoBalance * _tokenAmount) / circulatingSupply;
+        uint256 lpAmount = (lpBalance * _tokenAmount) / circulatingSupply;
 
-        // Take TotemTokens from the caller
-        totemToken.safeTransferFrom(
-            msg.sender,
-            address(this),
-            _totemTokenAmount
-        );
-
-        // Handle token disposal based on whether it's a custom token
-        if (isCustomToken) {
-            // For custom tokens, transfer to treasuryAddr instead of burning
-            totemToken.safeTransfer(treasuryAddr, _totemTokenAmount);
+        // Burn or transfer tokens based on token type
+        if (isCustomToken()) {
+            // Transfer custom tokens to treasury
+            SafeERC20.safeTransferFrom(
+                IERC20(totemTokenAddr),
+                msg.sender,
+                treasuryAddr,
+                _tokenAmount
+            );
         } else {
-            // For standard TotemTokens, burn them
-            totemToken.burn(_totemTokenAmount);
+            // Burn standard tokens
+            TotemToken(totemTokenAddr).burnFrom(msg.sender, _tokenAmount);
         }
 
-        // Transfer the proportional payment tokens to the caller if there are any
+        // Transfer payment tokens if there are any
         if (paymentAmount > 0) {
             paymentToken.safeTransfer(msg.sender, paymentAmount);
         }
@@ -203,13 +272,13 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         }
 
         // Transfer LP tokens if there are any
-        if (lpAmount > 0 && address(liquidityToken) != address(0)) {
+        if (lpAmount > 0) {
             liquidityToken.safeTransfer(msg.sender, lpAmount);
         }
 
-        emit TotemTokenBurned(
+        emit TotemTokenRedeemed(
             msg.sender,
-            _totemTokenAmount,
+            _tokenAmount,
             paymentAmount,
             mythoAmount,
             lpAmount
@@ -226,20 +295,28 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /**
-     * @notice Sets the payment token and liquidity token addresses and ends the sale period
+     * @notice Called by TotemTokenDistributor to end the sale period and set final token balances
      *      Should be called by TotemTokenDistributor after sale period ends
-     * @param _paymentToken The address of the payment token contract
-     * @param _liquidityToken The address of the liquidity token (LP token)
+     * @param _paymentToken The payment token address
+     * @param _liquidityToken The liquidity token address
      */
-    function closeSalePeriod(
+    function endSalePeriod(
         IERC20 _paymentToken,
         IERC20 _liquidityToken
-    ) external onlyRole(TOTEM_DISTRIBUTOR) whenNotPaused {
+    ) external onlyRole(TOTEM_DISTRIBUTOR) {
         paymentToken = _paymentToken;
         liquidityToken = _liquidityToken;
         salePeriodEnded = true;
 
         emit SalePeriodEnded();
+    }
+
+    /**
+     * @notice Checks if this token is a custom token (ERC20 or ERC721)
+     * @return True if the token is custom, false if it's a standard token
+     */
+    function isCustomToken() public view returns (bool) {
+        return tokenType != TokenType.STANDARD;
     }
 
     // VIEW FUNCTIONS
@@ -255,24 +332,20 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     /**
      * @notice Get the addresses of tokens associated with this Totem
-     * @return totemTokenAddr The address of the Totem token
-     * @return paymentTokenAddr The address of the payment token
-     * @return liquidityTokenAddr The address of the liquidity token
+     * @return _totemTokenAddr The address of the Totem token
+     * @return _paymentTokenAddr The address of the payment token
+     * @return _liquidityTokenAddr The address of the liquidity token
      */
     function getTokenAddresses()
         external
         view
         returns (
-            address totemTokenAddr,
-            address paymentTokenAddr,
-            address liquidityTokenAddr
+            address _totemTokenAddr,
+            address _paymentTokenAddr,
+            address _liquidityTokenAddr
         )
     {
-        return (
-            address(totemToken),
-            address(paymentToken),
-            address(liquidityToken)
-        );
+        return (totemTokenAddr, address(paymentToken), address(liquidityToken));
     }
 
     /**
@@ -283,7 +356,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return mythoBalance The balance of MYTHO tokens
      */
     function getAllBalances()
-        external
+        public
         view
         returns (
             uint256 totemBalance,
@@ -292,7 +365,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             uint256 mythoBalance
         )
     {
-        totemBalance = totemToken.balanceOf(address(this));
+        totemBalance = IERC20(totemTokenAddr).balanceOf(address(this));
         paymentBalance = address(paymentToken) != address(0)
             ? paymentToken.balanceOf(address(this))
             : 0;
@@ -313,7 +386,15 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return True if this is a custom token Totem, false otherwise
      */
     function isCustomTotemToken() external view returns (bool) {
-        return isCustomToken;
+        return isCustomToken();
+    }
+
+    /**
+     * @notice Get the token type
+     * @return The type of token (STANDARD, ERC20, ERC721)
+     */
+    function getTokenType() external view returns (TokenType) {
+        return tokenType;
     }
 
     /**
@@ -355,11 +436,26 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @return The circulating supply (total supply minus tokens held by Totem and Treasury for custom tokens)
      */
     function getCirculatingSupply() public view returns (uint256) {
-        uint256 totalSupply = totemToken.totalSupply();
-        uint256 totemBalance = totemToken.balanceOf(address(this));
-        uint256 treasuryBalance = isCustomToken
-            ? totemToken.balanceOf(treasuryAddr)
+        uint256 totemBalance = IERC20(totemTokenAddr).balanceOf(address(this));
+        uint256 treasuryBalance = isCustomToken()
+            ? IERC20(totemTokenAddr).balanceOf(treasuryAddr)
             : 0;
+        uint256 totalSupply;
+
+        if (tokenType == TokenType.ERC721) {
+            TokenHoldersOracle oracle = TokenHoldersOracle(AddressRegistry(registryAddr).getTokenHoldersOracle());
+            // For NFTs, get holder count from oracle
+            if (address(oracle) != address(0)) {
+                (totalSupply, ) = oracle.getHoldersCount(totemTokenAddr);
+            } else {
+                return 0; // No oracle data available
+            }
+        } else {
+            // For ERC20 tokens
+            totalSupply = IERC20(totemTokenAddr).totalSupply();
+        }
+
+        // Calculate circulating supply
         return totalSupply - totemBalance - treasuryBalance;
     }
 }
