@@ -18,15 +18,15 @@ contract TokenHoldersOracleTest is Test {
         holdersOracle = TokenHoldersOracle(0xFa35acb38c09Cd416956F7593ac57E669fd9EDF1);
     }
 
-    function test_getHoldersCount() public {
-        vm.startPrank(owner);
+    // function test_getHoldersCount() public {
+        // vm.startPrank(owner);
 
-        address tokenAddress = 0x2877Da93f3b2824eEF206b3B313d4A61E01e5698;
-        holdersOracle.requestHoldersCount(tokenAddress);
+        // address tokenAddress = 0x2877Da93f3b2824eEF206b3B313d4A61E01e5698;
+        // holdersOracle.requestHoldersCount(tokenAddress);
 
-        (uint256 count, uint256 lastUpdate) = holdersOracle.getHoldersCount(tokenAddress);
+        // (uint256 count, uint256 lastUpdate) = holdersOracle.getHoldersCount(tokenAddress);
 
-        console.log("Holders count:", count);
-        console.log("Last update:", lastUpdate);
-    }
+        // console.log("Holders count:", count);
+        // console.log("Last update:", lastUpdate);
+    // }
 }

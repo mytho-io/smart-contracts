@@ -38,7 +38,7 @@ contract TotemTokenDistributor is
     // State variables - Configuration
     uint256 private oneTotemPriceInUsd;
     uint256 public maxTokensPerAddress;
-    uint256 public slippagePercentage = 50; // Default 5% slippage (50/1000)
+    uint256 public slippagePercentage = 500; // Default 5% slippage (500/10000)
 
     // State variables - Distribution shares
     uint256 public revenuePaymentTokenShare;
@@ -177,7 +177,7 @@ contract TotemTokenDistributor is
     }
 
     /**
-     * @notice Buy totems for allowed payment tokens
+     * @notice Buy totem tokens for allowed payment tokens
      * @param _totemTokenAddr Address of the totem token to buy
      * @param _totemTokenAmount Amount of totem tokens to buy
      */
@@ -246,7 +246,7 @@ contract TotemTokenDistributor is
     }
 
     /**
-     * @notice Sell totems for used payment token in sale period
+     * @notice Sell totem tokens for used payment token in sale period
      * @param _totemTokenAddr Address of the totem token to sell
      * @param _totemTokenAmount Amount of totem tokens to sell
      */
@@ -485,7 +485,7 @@ contract TotemTokenDistributor is
         );
 
         // set payment token for Totem and close sale period
-        Totem(totems[_totemTokenAddr].totemAddr).closeSalePeriod(
+        Totem(totems[_totemTokenAddr].totemAddr).endSalePeriod(
             IERC20(_paymentTokenAddr),
             IERC20(liquidityToken)
         );

@@ -97,7 +97,7 @@ contract LayersTest is Test {
         TF.TotemData memory data = factory.getTotemData(totemId);
         assertEq(data.creator, userA);
         assertTrue(data.totemAddr != address(0));
-        assertFalse(data.isCustomToken);
+        assertFalse(uint8(data.tokenType) != uint8(TF.TokenType.STANDARD));
 
         // Buy totem tokens by userB
         prank(userB);
@@ -503,6 +503,224 @@ contract LayersTest is Test {
         // Verify operations work after unpause
         prank(userA);
         uint256 layerId = createLayer(userA, totemId);
+        assertEq(layers.ownerOf(layerId), userA);
+    }
+
+    function test_MinimumTotemTokenBalance() public {
+        // Create a totem
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Complete token sale first
+        buyAllTotemTokens(data.totemTokenAddr);
+        
+        // Check minimum token requirement
+        uint256 minRequired = layers.minTotemTokenBalance();
+        
+        // Verify userA has enough tokens (creator automatically gets tokens)
+        assertGe(TT(data.totemTokenAddr).balanceOf(userA), minRequired);
+        
+        // Give userB less than minimum tokens
+        prank(userA);
+        TT(data.totemTokenAddr).transfer(userB, minRequired / 2);
+        
+        // Verify userB has less than minimum
+        assertLt(TT(data.totemTokenAddr).balanceOf(userB), minRequired);
+        
+        // Attempt to create layer with insufficient tokens should fail
+        prank(userB);
+        vm.expectRevert(L.NotEnoughTotemTokens.selector);
+        layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        
+        // Give userB enough tokens
+        prank(userA);
+        TT(data.totemTokenAddr).transfer(userB, minRequired);
+        
+        // Verify userB now has enough tokens
+        assertGe(TT(data.totemTokenAddr).balanceOf(userB), minRequired);
+        
+        // Should now be able to create layer
+        prank(userB);
+        uint256 layerId = layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        
+        // Verify layer was created
+        assertEq(layers.userPendingLayer(userB), layerId);
+    }
+
+    function test_MeritManagerRewards() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Complete token sale to register totem in Merit Manager
+        buyAllTotemTokens(data.totemTokenAddr);
+        
+        // Verify totem is registered in Merit Manager
+        assertTrue(mm.isRegisteredTotem(data.totemAddr));
+        
+        // Create layer and verify it's successful
+        prank(userA);
+        uint256 layerId = layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        assertEq(layers.ownerOf(layerId), userA);
+        
+        // Test donation reward
+        vm.deal(userB, 5 ether);
+        prank(userB);
+        uint256 initialBalance = address(userA).balance;
+        layers.donateToLayer{value: 1 ether}(layerId);
+        
+        // Verify donation was processed
+        uint256 expectedFee = (1 ether * layers.donationFeePercentage()) / 10000;
+        assertEq(address(userA).balance, initialBalance + 1 ether - expectedFee);
+        assertEq(layers.totalDonations(layerId), 1 ether);
+    }
+    
+    function test_NoMeritManagerRewardsForUnregisteredTotem() public {
+        // Create totem but don't complete token sale (not registered in Merit Manager)
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Verify totem is NOT registered in Merit Manager
+        assertFalse(mm.isRegisteredTotem(data.totemAddr));
+        
+        // Create layer and verify it's successful even without Merit Manager registration
+        prank(userA);
+        uint256 layerId = layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        assertEq(layers.ownerOf(layerId), userA);
+        
+        // Test donation still works for unregistered totems
+        vm.deal(userB, 5 ether);
+        prank(userB);
+        uint256 initialBalance = address(userA).balance;
+        layers.donateToLayer{value: 1 ether}(layerId);
+        
+        // Verify donation was processed
+        uint256 expectedFee = (1 ether * layers.donationFeePercentage()) / 10000;
+        assertEq(address(userA).balance, initialBalance + 1 ether - expectedFee);
+        assertEq(layers.totalDonations(layerId), 1 ether);
+    }
+    
+    function test_MetadataHashFunctionality() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        bytes memory metadataHash = abi.encodePacked(keccak256("Custom Metadata"));
+        
+        // Create layer with custom metadata
+        prank(userA);
+        uint256 layerId = layers.createLayer(data.totemAddr, metadataHash);
+        
+        // Verify metadata hash is stored correctly
+        bytes memory storedHash = layers.getMetadataHash(layerId);
+        assertEq(keccak256(storedHash), keccak256(metadataHash));
+        
+        // Test getting metadata for non-existent layer
+        prank(userA);
+        vm.expectRevert(L.LayerNotFound.selector);
+        layers.getMetadataHash(999);
+    }
+    
+    function test_MeritManagerLayerRewards() public {
+        // Create a totem
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Complete token sale to register totem in Merit Manager
+        buyAllTotemTokens(data.totemTokenAddr);
+        
+        // Verify totem is registered in Merit Manager
+        assertTrue(mm.isRegisteredTotem(data.totemAddr));
+        
+        // Create layer and verify it's successful
+        prank(userA);
+        uint256 layerId = layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        assertEq(layers.ownerOf(layerId), userA);
+        
+        // Verify the layer exists
+        L.Layer memory layer = layers.getLayer(layerId);
+        assertEq(layer.creator, userA);
+        assertEq(layer.totemAddr, data.totemAddr);
+    }
+    
+    function test_CreatorRewardOnlyOncePerLayer() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Create layer
+        uint256 layerId = createLayer(userA, totemId);
+        
+        // Multiple users boost the layer
+        // UserB boosts
+        prank(userB);
+        astrToken.approve(address(distr), 500_000 ether);
+        distr.buy(data.totemTokenAddr, 500_000 ether);
+        TT(data.totemTokenAddr).approve(address(layers), 500_000 ether);
+        layers.boostLayer(layerId, 500_000 ether);
+        
+        // UserC boosts
+        prank(userC);
+        astrToken.approve(address(distr), 500_000 ether);
+        distr.buy(data.totemTokenAddr, 500_000 ether);
+        TT(data.totemTokenAddr).approve(address(layers), 500_000 ether);
+        layers.boostLayer(layerId, 500_000 ether);
+        
+        // Wait for boost window to end
+        warp(25 hours);
+        
+        // First unboost should trigger creator reward
+        uint256 initialCreatorShards = shards.balanceOf(userA);
+        prank(userB);
+        layers.unboostLayer(layerId);
+        uint256 creatorRewardAmount = shards.balanceOf(userA) - initialCreatorShards;
+        assertGt(creatorRewardAmount, 0);
+        
+        // Second unboost should not give additional creator reward
+        initialCreatorShards = shards.balanceOf(userA);
+        prank(userC);
+        layers.unboostLayer(layerId);
+        assertEq(shards.balanceOf(userA), initialCreatorShards);
+    }
+    
+    function test_BoostingAfterWindowEnds() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Create layer
+        uint256 layerId = createLayer(userA, totemId);
+        
+        // Wait for boost window to end
+        warp(25 hours);
+        
+        // Try to boost after window ends
+        prank(userB);
+        astrToken.approve(address(distr), 500_000 ether);
+        distr.buy(data.totemTokenAddr, 500_000 ether);
+        TT(data.totemTokenAddr).approve(address(layers), 500_000 ether);
+        
+        // Should NOT be able to boost after window (expect revert)
+        vm.expectRevert(L.BoostWindowClosed.selector);
+        layers.boostLayer(layerId, 500_000 ether);
+    }
+    
+    function test_EcosystemPause() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+        
+        // Pause the ecosystem
+        prank(deployer);
+        registry.setEcosystemPaused(true);
+        
+        // Try to create layer while ecosystem is paused
+        prank(userA);
+        vm.expectRevert(L.EcosystemPaused.selector);
+        layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        
+        // Unpause the ecosystem
+        prank(deployer);
+        registry.setEcosystemPaused(false);
+        
+        // Should be able to create layer now
+        prank(userA);
+        uint256 layerId = layers.createLayer(data.totemAddr, abi.encodePacked(keccak256("Test")));
         assertEq(layers.ownerOf(layerId), userA);
     }
 

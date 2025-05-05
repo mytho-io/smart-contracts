@@ -76,7 +76,7 @@ contract MeritManager is
 
     // Custom errors
     error TotemNotRegistered();
-    error TotemInBlocklist();
+    error TotemInBlacklist();
     error TotemAlreadyRegistered();
     error AlreadyBlacklisted(address totem);
     error AlreadyNotInBlacklist(address totem);
@@ -124,10 +124,9 @@ contract MeritManager is
         vestingWallets = _vestingWallets;
         periodDuration = 30 days;
         startTime = block.timestamp; // Initially set to deployment timestamp
-        accumulatedPeriods = 0;
         vestingWalletsAllocation = [
-            175_000_000 ether,
-            125_000_000 ether,
+            200_000_000 ether,
+            150_000_000 ether,
             100_000_000 ether,
             50_000_000 ether
         ];
@@ -164,7 +163,7 @@ contract MeritManager is
         address _totemAddr
     ) external payable nonReentrant whenNotPaused {
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
         if (msg.value < boostFee) revert InsufficientBoostFee();
         if (!isMythum()) revert NotInMythumPeriod();
 
@@ -211,7 +210,7 @@ contract MeritManager is
     ) external nonReentrant whenNotPaused {
         address totemAddr = msg.sender;
         if (!registeredTotems[totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlocklist();
+        if (hasRole(BLACKLISTED, totemAddr)) revert TotemInBlacklist();
         if (isClaimed[_periodNum][totemAddr]) revert AlreadyClaimed(_periodNum);
         if (_periodNum > currentPeriod()) revert InvalidPeriod();
 
@@ -468,11 +467,6 @@ contract MeritManager is
     function _updateState() private {
         uint256 yearIdx = getYearIndex();
 
-        // Check if we're still within the valid year range
-        if (yearIdx >= 4) {
-            return;
-        }
-
         VestingWallet wallet = VestingWallet(payable(vestingWallets[yearIdx]));
 
         uint256 _currentPeriod = currentPeriod();
@@ -505,7 +499,7 @@ contract MeritManager is
     function _creditMerit(address _totemAddr, uint256 _amount) private {
         if (_amount == 0) revert ZeroAmount();
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlocklist();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
 
         uint256 currentPeriod_ = currentPeriod();
 
@@ -543,7 +537,7 @@ contract MeritManager is
             accumulatedPeriods;
         uint256 currentPeriodStart = startTime +
             (periodsAfterAccumulation * periodDuration);
-        uint256 mythumStart = currentPeriodStart + ((periodDuration * 3) / 4);
+        uint256 mythumStart = currentPeriodStart + ((periodDuration * 23) / 30);
         return block.timestamp >= mythumStart;
     }
 
@@ -677,7 +671,7 @@ contract MeritManager is
             accumulatedPeriods;
         uint256 currentPeriodStart = startTime +
             (periodsAfterAccumulation * periodDuration);
-        return currentPeriodStart + ((periodDuration * 3) / 4);
+        return currentPeriodStart + ((periodDuration * 23) / 30);
     }
 
     /**

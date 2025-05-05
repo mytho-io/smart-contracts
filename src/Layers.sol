@@ -2,11 +2,11 @@
 // Copyright 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
+import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import {ERC721Upgradeable} from "@openzeppelin-upgradeable/contracts/token/ERC721/ERC721Upgradeable.sol";
 import {ERC721RoyaltyUpgradeable} from "@openzeppelin-upgradeable/contracts/token/ERC721/extensions/ERC721RoyaltyUpgradeable.sol";
-import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
@@ -53,6 +53,7 @@ contract Layers is
     uint256 public minTotemTokenBalance; // Minimum totem token balance required to create a layer
     uint256 public donationFeePercentage; // Percentage of donation taken as fee (1000 = 10%)
     uint256 public minDonationFee; // Minimum fee amount in wei for donations
+    uint256 public maxBoostAmount; // Maximum amount of tokens that can be boosted per user per layer
 
     // State variables - Addresses
     address private registryAddr;
@@ -111,6 +112,7 @@ contract Layers is
     error DonationFailed();
     error FeeTooLow();
     error InvalidDuration();
+    error MaxBoostExceeded();
 
     /**
      * @notice Initializes the contract with the registry address
@@ -143,6 +145,7 @@ contract Layers is
         minTotemTokenBalance = 1 ether; // min totem token balance required to create a layer
         donationFeePercentage = 100; // 1% donation fee by default
         minDonationFee = 0.001 ether; // 0.001 minimum donation fee by default
+        maxBoostAmount = 50_000_000 * 10**18; // 50,000,000 tokens maximum boost by default
 
         // Start counters from 1 so 0 can be used as "no pending layer" indicator
         layerCounter = 1;
@@ -168,11 +171,18 @@ contract Layers is
         // Check if Totem exists
         if (_dataHash.length == 0) revert InvalidMetadataHash();
 
-        // Check if caller has enough totem tokens
-        if (
-            IERC20(totemData.totemTokenAddr).balanceOf(msg.sender) <
-            minTotemTokenBalance // 1 min balance by default
-        ) revert NotEnoughTotemTokens();
+        // Check token balance requirements based on token type
+        if (totemData.tokenType == TotemFactory.TokenType.ERC721) {
+            // For ERC721 tokens, require at least 1 NFT
+            if (IERC20(totemData.totemTokenAddr).balanceOf(msg.sender) < 1) 
+                revert NotEnoughTotemTokens();
+        } else {
+            // For ERC20 tokens (standard or custom), require minimum token balance
+            if (
+                IERC20(totemData.totemTokenAddr).balanceOf(msg.sender) <
+                minTotemTokenBalance
+            ) revert NotEnoughTotemTokens();
+        }
 
         // Check if caller is authorized
         bool isAutoApproved = msg.sender == totemData.creator ||
@@ -300,6 +310,11 @@ contract Layers is
         (address totemTokenAddr, , ) = totem.getTokenAddresses();
         if (IERC20(totemTokenAddr).balanceOf(msg.sender) < _tokenAmount)
             revert InsufficientBalance();
+            
+        // Check if boost amount exceeds the maximum allowed
+        uint256 currentBoost = boosts[_layerId][msg.sender];
+        if (currentBoost + _tokenAmount > maxBoostAmount)
+            revert MaxBoostExceeded();
 
         IERC20(totemTokenAddr).safeTransferFrom(
             msg.sender,
@@ -331,13 +346,13 @@ contract Layers is
         Totem totem = Totem(layer.totemAddr);
         (address totemTokenAddr, , ) = totem.getTokenAddresses();
 
-        uint256 totalSupply = IERC20(totemTokenAddr).totalSupply();
+        uint256 circulatingSupply = totem.getCirculatingSupply();
 
         // Calculate user's shard reward
         uint256 shardReward = _calculateShardReward(
             boostAmount,
             layer.totalBoostedTokens,
-            totalSupply
+            circulatingSupply
         );
 
         // Return tokens to user
@@ -354,7 +369,7 @@ contract Layers is
                 uint256 totalLayerRewards = _calculateShardReward(
                     layer.totalBoostedTokens,
                     layer.totalBoostedTokens,
-                    totalSupply
+                    circulatingSupply
                 );
                 uint256 creatorReward = Math.max(
                     minAuthorShardReward,
@@ -501,6 +516,14 @@ contract Layers is
     }
 
     /**
+     * @notice Sets the maximum boost amount
+     * @param _amount The new maximum boost amount
+     */
+    function setMaxBoostAmount(uint256 _amount) external onlyRole(MANAGER) {
+        maxBoostAmount = _amount;
+    }
+
+    /**
      * @notice Pauses all contract operations
      */
     function pause() external onlyRole(MANAGER) {
@@ -549,22 +572,22 @@ contract Layers is
      * @notice Calculate shard reward for a booster
      * @param _userLockedTokens Amount of tokens locked by the user
      * @param _totalLockedTokens Total amount of tokens locked for the layer
-     * @param _tokenTotalSupply Total supply of the totem token
+     * @param _tokenCirculatingSupply Circulating supply of the totem token (excluding Totem and Treasury balances)
      * @return shardReward Amount of shards to be rewarded
      */
     function _calculateShardReward(
         uint256 _userLockedTokens,
         uint256 _totalLockedTokens,
-        uint256 _tokenTotalSupply
+        uint256 _tokenCirculatingSupply
     ) internal view returns (uint256) {
-        if (_totalLockedTokens == 0 || _tokenTotalSupply == 0) return 0;
+        if (_totalLockedTokens == 0 || _tokenCirculatingSupply == 0) return 0;
 
         // Calculate square root of (L/T), capped at 10%
-        uint256 lockedRatio = Math.min((_totalLockedTokens * 1e18) / _tokenTotalSupply, 1e17);
+        uint256 lockedRatio = Math.min((_totalLockedTokens * 1e18) / _tokenCirculatingSupply, 1e17);
         uint256 sqrtRatio = Math.sqrt(lockedRatio);
 
         // Calculate (l/T)
-        uint256 userRatio = (_userLockedTokens * 1e18) / _tokenTotalSupply;
+        uint256 userRatio = (_userLockedTokens * 1e18) / _tokenCirculatingSupply;
 
         // Final formula: S * (l/T) * sqrt(L/T)
         return (baseShardReward * userRatio * sqrtRatio) / 1e36;

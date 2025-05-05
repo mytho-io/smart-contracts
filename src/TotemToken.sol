@@ -19,7 +19,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
 
     // Immutable variables
     address public immutable totemDistributor; // Address of the distributor, the only one who can transfer tokens during sale period
-    address public immutable layers; // Address of the Layers contract
+    address public immutable registryAddr;
 
     // Constants
     uint256 private constant INITIAL_SUPPLY = 1_000_000_000 ether;
@@ -37,7 +37,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
      * @notice Mints 1_000_000_000 tokens and assigns them to the distributor
      * @param _name The name of the token
      * @param _symbol The symbol of the token
-     * @param _registryAddr The address of the registry contract
+     * @param _registryAddr The address of the registry contract used to access system contracts
      */
     constructor(
         string memory _name,
@@ -46,8 +46,10 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
     ) ERC20(_name, _symbol) ERC20Permit(_name) {
         if (_registryAddr == address(0)) revert InvalidAddress();
 
-        totemDistributor = AddressRegistry(_registryAddr).getTotemTokenDistributor();
-        layers = AddressRegistry(_registryAddr).getLayers();
+        totemDistributor = AddressRegistry(_registryAddr)
+            .getTotemTokenDistributor();
+
+        registryAddr = _registryAddr;
 
         // Mint all tokens at once and assign them to the distributor
         _mint(totemDistributor, INITIAL_SUPPLY);
@@ -94,9 +96,13 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         address _to,
         uint256 _value
     ) internal override {
-        // During sale period, only the distributor can transfer tokens
-        // Burning (transfer to address(0)) is also restricted during sale period
-        if (salePeriod && msg.sender != totemDistributor && msg.sender != layers) {
+        // During sale period, only the distributor and Layers contract can transfer tokens
+        // All other transfers (including burning) are restricted during sale period
+        if (
+            salePeriod &&
+            msg.sender != totemDistributor &&
+            msg.sender != AddressRegistry(registryAddr).getLayers()
+        ) {
             revert NotAllowedInSalePeriod();
         }
 

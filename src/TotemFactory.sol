@@ -7,11 +7,13 @@ import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/Pau
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
 import {TotemToken} from "./TotemToken.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
+import {TokenHoldersOracle} from "./utils/TokenHoldersOracle.sol";
 
 /**
  * @title TotemFactory
@@ -21,13 +23,20 @@ import {AddressRegistry} from "./AddressRegistry.sol";
 contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     using SafeERC20 for IERC20;
 
+    // Enum for token types
+    enum TokenType {
+        STANDARD,  // 0: Standard (non-custom) token
+        ERC20,     // 1: Custom ERC20 token
+        ERC721     // 2: Custom ERC721 token
+    }
+
     // State variables - Contracts
     TotemTokenDistributor private totemDistributor;
-    MeritManager private meritManager;
 
     // State variables - Addresses
     address private beaconAddr;
     address private treasuryAddr;
+    address private meritManagerAddr;
     address private registryAddr;
     address private feeTokenAddr;
 
@@ -35,7 +44,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     uint256 private creationFee;
     uint256 private lastId;
 
-    // State variables - Mappings
+    // Mappings
     mapping(uint256 totemId => TotemData data) private totemData;
     mapping(address totemAddr => TotemData data) private totemDataByAddress;
     mapping(address token => mapping(address user => bool)) private authorized;
@@ -46,26 +55,34 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         address totemTokenAddr;
         address totemAddr;
         bytes dataHash;
-        bool isCustomToken;
+        TokenType tokenType;
     }
 
     // Constants - Roles
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
+    // Constants - ERC165 Interface IDs
+    bytes4 private constant ERC721_INTERFACE_ID = 0x80ac58cd;
+
     // Events
     event TotemCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
-    event TotemWithExistingTokenCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
+    event TotemWithExistingTokenCreated(address totemAddr, address totemTokenAddr, uint256 totemId, TokenType tokenType); // prettier-ignore
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address oldToken, address newToken);
+    event BatchWhitelistUpdated(address[] tokens, bool isAdded);
     event TokenAuthorizationUpdated(address indexed token, address indexed user, bool isAuthorized); // prettier-ignore
+    event TokenHoldersOracleUpdated(address oldOracle, address newOracle);
 
     // Custom errors
     error TokenAlreadyAuthorized(address token, address user);
+    error AlreadyWhitelisted(address totemTokenAddr);
+    error NotWhitelisted(address totemTokenAddr);
     error ZeroAddress();
     error InvalidTotemParameters(string reason);
     error TotemNotFound(uint256 totemId);
     error EcosystemPaused();
     error UserNotAuthorized(address user, address token);
+    error UnsupportedTokenType();
 
     /**
      * @notice Initializes the TotemFactory contract
@@ -92,7 +109,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             AddressRegistry(_registryAddr).getTotemTokenDistributor()
         );
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
-        meritManager = MeritManager(AddressRegistry(_registryAddr).getMeritManager());
+        meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         beaconAddr = _beaconAddr;
         registryAddr = _registryAddr;
 
@@ -104,10 +121,10 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
 
     /**
      * @notice Creates a new totem with a new token
-     *      Deploys a new TotemToken and Totem proxy
+     *      Deploys a new TotemToken and Totem contract
      * @param _dataHash The hash of the totem data
-     * @param _tokenName The name of the token
-     * @param _tokenSymbol The symbol of the token
+     * @param _tokenName The name of the new token
+     * @param _tokenSymbol The symbol of the new token
      * @param _collaborators Array of collaborator addresses
      */
     function createTotem(
@@ -127,22 +144,24 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         // Collect fee in ASTR tokens
         _collectFee(msg.sender);
 
+        // Deploy a new TotemToken
         TotemToken totemToken = new TotemToken(
             _tokenName,
             _tokenSymbol,
             registryAddr
         );
 
+        // Deploy a new Totem proxy
         BeaconProxy proxy = new BeaconProxy(
             beaconAddr,
             abi.encodeWithSignature(
-                "initialize(address,bytes,address,bool,address,address[])",
-                address(totemToken),
+                "initialize(address,bytes,address,address,address[],uint8)",
+                totemToken,
                 _dataHash,
                 registryAddr,
-                false,
                 msg.sender,
-                _collaborators
+                _collaborators,
+                uint8(TokenType.STANDARD)
             )
         );
 
@@ -151,9 +170,9 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             totemTokenAddr: address(totemToken),
             totemAddr: address(proxy),
             dataHash: _dataHash,
-            isCustomToken: false
+            tokenType: TokenType.STANDARD
         });
-        
+
         totemData[lastId++] = data;
         totemDataByAddress[address(proxy)] = data;
 
@@ -166,6 +185,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     /**
      * @notice Creates a new totem with an existing whitelisted token
      *      Uses an existing token instead of deploying a new one
+     *      Supports both ERC20 and ERC721 token standards
      * @param _dataHash The hash of the totem data
      * @param _tokenAddr The address of the existing token
      * @param _collaborators Array of collaborator addresses
@@ -178,6 +198,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         if (_dataHash.length == 0) {
             revert InvalidTotemParameters("Empty dataHash");
         }
+        if (_tokenAddr == address(0)) revert ZeroAddress();
 
         // Collect fee in ASTR tokens
         _collectFee(msg.sender);
@@ -186,16 +207,30 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         if (!authorized[_tokenAddr][msg.sender])
             revert UserNotAuthorized(msg.sender, _tokenAddr);
 
+        // Determine token type (ERC20 or ERC721)
+        TokenType tokenType = TokenType.ERC20; // Default to ERC20
+        
+        // Check if token is ERC721
+        if (_isERC721(_tokenAddr)) {
+            tokenType = TokenType.ERC721;
+
+            // Set token holders oracle
+            TokenHoldersOracle oracle = TokenHoldersOracle(AddressRegistry(registryAddr).getTokenHoldersOracle());
+            
+            // Request initial holders count from oracle
+            oracle.requestHoldersCount(_tokenAddr);
+        }
+
         BeaconProxy proxy = new BeaconProxy(
             beaconAddr,
             abi.encodeWithSignature(
-                "initialize(address,bytes,address,bool,address,address[])",
+                "initialize(address,bytes,address,address,address[],uint8)",
                 _tokenAddr,
                 _dataHash,
                 registryAddr,
-                true,
                 msg.sender,
-                _collaborators
+                _collaborators,
+                uint8(tokenType)
             )
         );
 
@@ -204,18 +239,19 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             totemTokenAddr: _tokenAddr,
             totemAddr: address(proxy),
             dataHash: _dataHash,
-            isCustomToken: true
+            tokenType: tokenType
         });
         
         totemData[lastId++] = data;
         totemDataByAddress[address(proxy)] = data;
 
-        meritManager.register(address(proxy));
+        MeritManager(meritManagerAddr).register(address(proxy));
 
         emit TotemWithExistingTokenCreated(
             address(proxy),
             _tokenAddr,
-            lastId - 1
+            lastId - 1,
+            tokenType
         );
     }
 
@@ -232,19 +268,18 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @notice Updates the fee token address
-     * @param _newFeeToken The address of the new fee token
+     * @notice Updates the fee token
+     * @param _newToken The new fee token address
      */
-    function setFeeToken(address _newFeeToken) public onlyRole(MANAGER) {
-        if (_newFeeToken == address(0)) revert ZeroAddress();
-
+    function setFeeToken(address _newToken) public onlyRole(MANAGER) {
+        if (_newToken == address(0)) revert ZeroAddress();
         address oldToken = feeTokenAddr;
-        feeTokenAddr = _newFeeToken;
-        emit FeeTokenUpdated(oldToken, _newFeeToken);
+        feeTokenAddr = _newToken;
+        emit FeeTokenUpdated(oldToken, _newToken);
     }
 
     /**
-     * @notice Authorizes users for a token
+     * @notice Authorizes users to create totems with specific tokens
      * @param _token The token address
      * @param _users Array of user addresses to authorize
      */
@@ -298,14 +333,14 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     /**
      * @notice Pauses the contract
      */
-    function pause() public onlyRole(MANAGER) {
+    function pause() external onlyRole(MANAGER) {
         _pause();
     }
 
     /**
      * @notice Unpauses the contract
      */
-    function unpause() public onlyRole(MANAGER) {
+    function unpause() external onlyRole(MANAGER) {
         _unpause();
     }
 
@@ -336,6 +371,19 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         );
     }
 
+    /**
+     * @notice Checks if a token is an ERC721 token
+     * @param _token The token address to check
+     * @return True if the token is an ERC721, false otherwise
+     */
+    function _isERC721(address _token) internal view returns (bool) {
+        try IERC165(_token).supportsInterface(ERC721_INTERFACE_ID) returns (bool supported) {
+            return supported;
+        } catch {
+            return false;
+        }
+    }
+
     // VIEW FUNCTIONS
 
     /**
@@ -363,7 +411,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     }
 
     /**
-     * @notice Gets data for a specific totem by ID
+     * @notice Gets data for a specific totem
      * @param _totemId The ID of the totem
      * @return The totem data structure
      */
@@ -386,5 +434,14 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         TotemData memory data = totemDataByAddress[_totemAddr];
         if (data.totemAddr == address(0)) revert TotemNotFound(0);
         return data;
+    }
+
+    /**
+     * @notice Checks if a token is a custom token
+     * @param _tokenType The token type to check
+     * @return True if the token is custom (ERC20 or ERC721), false otherwise
+     */
+    function isCustomToken(TokenType _tokenType) public pure returns (bool) {
+        return _tokenType != TokenType.STANDARD;
     }
 }
