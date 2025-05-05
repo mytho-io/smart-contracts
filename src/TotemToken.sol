@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Copyright © 2025 Mytho. All Rights Reserved.
+// Copyright 2025 Mytho. All Rights Reserved.
 pragma solidity ^0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+
+import {AddressRegistry} from "../src/AddressRegistry.sol";
 
 /**
  * @title TotemToken
@@ -17,6 +19,7 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
 
     // Immutable variables
     address public immutable totemDistributor; // Address of the distributor, the only one who can transfer tokens during sale period
+    address public immutable registryAddr;
 
     // Constants
     uint256 private constant INITIAL_SUPPLY = 1_000_000_000 ether;
@@ -34,19 +37,22 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
      * @notice Mints 1_000_000_000 tokens and assigns them to the distributor
      * @param _name The name of the token
      * @param _symbol The symbol of the token
-     * @param _totemDistributor The address of the token distributor
+     * @param _registryAddr The address of the registry contract used to access system contracts
      */
     constructor(
         string memory _name,
         string memory _symbol,
-        address _totemDistributor
+        address _registryAddr
     ) ERC20(_name, _symbol) ERC20Permit(_name) {
-        if (_totemDistributor == address(0)) revert InvalidAddress();
+        if (_registryAddr == address(0)) revert InvalidAddress();
 
-        totemDistributor = _totemDistributor;
+        totemDistributor = AddressRegistry(_registryAddr)
+            .getTotemTokenDistributor();
+
+        registryAddr = _registryAddr;
 
         // Mint all tokens at once and assign them to the distributor
-        _mint(_totemDistributor, 1_000_000_000 ether);
+        _mint(totemDistributor, INITIAL_SUPPLY);
 
         // Enable sale period
         salePeriod = true;
@@ -90,9 +96,13 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         address _to,
         uint256 _value
     ) internal override {
-        // During sale period, only the distributor can transfer tokens
-        // Burning (transfer to address(0)) is also restricted during sale period
-        if (salePeriod && msg.sender != totemDistributor) {
+        // During sale period, only the distributor and Layers contract can transfer tokens
+        // All other transfers (including burning) are restricted during sale period
+        if (
+            salePeriod &&
+            msg.sender != totemDistributor &&
+            msg.sender != AddressRegistry(registryAddr).getLayers()
+        ) {
             revert NotAllowedInSalePeriod();
         }
 

@@ -23,13 +23,11 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR =
         "TOTEM_TOKEN_DISTRIBUTOR";
     bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
+    bytes32 private constant SHARD_TOKEN = "SHARD_TOKEN";
+    bytes32 private constant LAYERS = "LAYERS";
 
     // Events
-    event AddressSet(
-        bytes32 indexed id,
-        address oldAddress,
-        address newAddress
-    );
+    event AddressSet(bytes32 indexed id, address oldAddress, address newAddress); // prettier-ignore
     event TotemsPaused(bool isPaused);
     event EcosystemPaused(bool isPaused);
 
@@ -125,6 +123,22 @@ contract AddressRegistry is AccessControlUpgradeable {
      */
     function getTotemTokenDistributor() external view returns (address) {
         return getAddress(TOTEM_TOKEN_DISTRIBUTOR);
+    }
+    
+    /**
+     * @notice Gets the address of the ShardToken contract
+     * @return Address of the ShardToken contract
+     */
+    function getShardToken() external view returns (address) {
+        return getAddress(SHARD_TOKEN);
+    }
+
+    /**
+     * @notice Gets the address of the LayerNFT contract
+     * @return Address of the LayerNFT contract
+     */
+    function getLayers() external view returns (address) {
+        return getAddress(LAYERS);
     }
 
     /**

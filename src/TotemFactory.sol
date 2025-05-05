@@ -148,7 +148,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         TotemToken totemToken = new TotemToken(
             _tokenName,
             _tokenSymbol,
-            address(totemDistributor)
+            registryAddr
         );
 
         // Deploy a new Totem proxy
