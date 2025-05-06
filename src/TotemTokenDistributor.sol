@@ -621,7 +621,7 @@ contract TotemTokenDistributor is
     function paymentTokenToTotems(
         address _tokenAddr,
         uint256 _paymentTokenAmount
-    ) public view returns (uint256) {
+    ) external view returns (uint256) {
         uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr)) /
             oneTotemPriceInUsd;
         return amount == 0 ? 1 : amount;

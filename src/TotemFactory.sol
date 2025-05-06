@@ -132,7 +132,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         string memory _tokenName,
         string memory _tokenSymbol,
         address[] memory _collaborators
-    ) public whenNotPaused {
+    ) external whenNotPaused {
         if (
             bytes(_tokenName).length == 0 ||
             bytes(_tokenSymbol).length == 0 ||
@@ -193,7 +193,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         bytes memory _dataHash,
         address _tokenAddr,
         address[] memory _collaborators
-    ) public whenNotPaused {
+    ) external whenNotPaused {
         if (_dataHash.length == 0) {
             revert InvalidTotemParameters("Empty dataHash");
         }
@@ -260,7 +260,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @notice Updates the creation fee
      * @param _newFee The new fee amount
      */
-    function setCreationFee(uint256 _newFee) public onlyRole(MANAGER) {
+    function setCreationFee(uint256 _newFee) external onlyRole(MANAGER) {
         uint256 oldFee = creationFee;
         creationFee = _newFee;
         emit CreationFeeUpdated(oldFee, _newFee);
@@ -270,7 +270,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @notice Updates the fee token
      * @param _newToken The new fee token address
      */
-    function setFeeToken(address _newToken) public onlyRole(MANAGER) {
+    function setFeeToken(address _newToken) external onlyRole(MANAGER) {
         if (_newToken == address(0)) revert ZeroAddress();
         address oldToken = feeTokenAddr;
         feeTokenAddr = _newToken;
@@ -285,7 +285,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function authorizeUsers(
         address _token,
         address[] calldata _users
-    ) public onlyRole(MANAGER) {
+    ) external onlyRole(MANAGER) {
         if (_token == address(0)) revert ZeroAddress();
 
         for (uint256 i = 0; i < _users.length; i++) {
@@ -307,7 +307,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     function deauthorizeUsers(
         address _token,
         address[] calldata _users
-    ) public onlyRole(MANAGER) {
+    ) external onlyRole(MANAGER) {
         for (uint256 i = 0; i < _users.length; i++) {
             if (_users[i] != address(0)) {
                 authorized[_token][_users[i]] = false;
@@ -440,7 +440,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
      * @param _tokenType The token type to check
      * @return True if the token is custom (ERC20 or ERC721), false otherwise
      */
-    function isCustomToken(TokenType _tokenType) public pure returns (bool) {
+    function isCustomToken(TokenType _tokenType) external pure returns (bool) {
         return _tokenType != TokenType.STANDARD;
     }
 }

@@ -289,7 +289,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
      * @notice Collects accumulated MYTHO from MeritManager for a specific period
      * @param _periodNum The period number to collect rewards for
      */
-    function collectMYTH(uint256 _periodNum) public whenNotPaused {
+    function collectMYTH(uint256 _periodNum) external whenNotPaused {
         MeritManager(meritManagerAddr).claimMytho(_periodNum);
         emit MythoCollected(msg.sender, _periodNum);
     }
