@@ -170,7 +170,10 @@ contract ComplexTest is Test {
         prank(userA);
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(customToken)),
+            abi.encodeWithSelector(
+                TokenHoldersOracle.requestHoldersCount.selector,
+                address(customToken)
+            ),
             abi.encode()
         );
         factory.createTotemWithExistingToken(
@@ -204,35 +207,38 @@ contract ComplexTest is Test {
     function test_TotemCreating_NFTToken() public {
         // Create a mock NFT
         MockERC721 nftToken = new MockERC721();
-        
+
         // Mint some NFTs to users
         nftToken.mint(userA, 1);
         nftToken.mint(userB, 2);
         nftToken.mint(userC, 3);
 
         vm.deal(userA, 1 ether);
-        
+
         // Authorize userA to create a totem with the NFT token
         prank(deployer);
         address[] memory usersToAuthorize = new address[](1);
         usersToAuthorize[0] = userA;
         factory.authorizeUsers(address(nftToken), usersToAuthorize);
-        
+
         // Get initial treasury balance
         uint256 initTreasuryBalanceInFeeTokens = IERC20(factory.getFeeToken())
             .balanceOf(address(treasury));
-            
+
         // Approve fee token for totem creation
         prank(userA);
         IERC20(factory.getFeeToken()).approve(
             address(factory),
             factory.getCreationFee()
         );
-        
+
         // Create totem with NFT token
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(nftToken)),
+            abi.encodeWithSelector(
+                TokenHoldersOracle.requestHoldersCount.selector,
+                address(nftToken)
+            ),
             abi.encode(0)
         );
 
@@ -241,32 +247,32 @@ contract ComplexTest is Test {
             address(nftToken),
             new address[](0)
         );
-        
+
         // Verify totem was created
         assertEq(factory.getLastId(), 1);
         assertEq(
             IERC20(factory.getFeeToken()).balanceOf(address(treasury)),
             initTreasuryBalanceInFeeTokens + factory.getCreationFee()
         );
-        
+
         // Get totem data
         TF.TotemData memory data = factory.getTotemData(0);
         assertEq(uint(data.tokenType), uint(TF.TokenType.ERC721));
         assertEq(data.totemTokenAddr, address(nftToken));
         assertEq(data.creator, userA);
-        
+
         // Get totem instance
         Totem totem = Totem(data.totemAddr);
-        
+
         // Manually update holders count in oracle (simulating Chainlink Functions response)
         prank(deployer);
         holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3); // 3 NFT holders
-        
+
         // Test getCirculatingSupply for NFT
         prank(userA);
         uint256 circulatingSupply = totem.getCirculatingSupply();
         assertEq(circulatingSupply, 3); // Should be equal to number of NFT holders
-        
+
         // Test redeeming NFT tokens
         // First, we need to end the sale period
         prank(deployer);
@@ -274,9 +280,14 @@ contract ComplexTest is Test {
         address distributorAddr = registry.getTotemTokenDistributor();
         // Use the distributor to call endSalePeriod
         prank(distributorAddr);
-        Totem totemContract = Totem(factory.getTotemData(factory.getLastId() - 1).totemAddr);
-        totemContract.endSalePeriod(IERC20(address(paymentToken)), IERC20(address(0)));
-        
+        Totem totemContract = Totem(
+            factory.getTotemData(factory.getLastId() - 1).totemAddr
+        );
+        totemContract.endSalePeriod(
+            IERC20(address(paymentToken)),
+            IERC20(address(0))
+        );
+
         // Verify that the sale period has ended
         assertTrue(totemContract.isSalePeriodEnded());
 
@@ -285,8 +296,8 @@ contract ComplexTest is Test {
 
         vm.warp(60 days);
 
-        holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3);        
-        
+        holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3);
+
         // Now redeem tokens as userA (who holds NFT)
         prank(userA);
         totem.collectMYTH(mm.currentPeriod() - 1);
@@ -295,7 +306,7 @@ contract ComplexTest is Test {
 
         circulatingSupply = totem.getCirculatingSupply();
         assertEq(circulatingSupply, 2);
-        
+
         // Verify user received proportional assets
         // Since there are 3 NFT holders, each should get 1/3 of the rewards
         uint256 mythoBalance = mytho.balanceOf(userA);
@@ -420,9 +431,18 @@ contract ComplexTest is Test {
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
 
+        (, , address lpAddr) = totem.getTokenAddresses();
+        IERC20 lpToken = IERC20(lpAddr);
+
         prank(userA);
+        uint256 balanceBefore = paymentToken.balanceOf(userA);
         IERC20(totemTokenAddr).approve(address(totem), 50 ether);
+        (uint256 paymentAmount, uint256 mythoAmount, uint256 lpAmount) = totem
+            .estimateRedeemRewards(50 ether);
         totem.redeemTotemTokens(50 ether);
+        assertEq(paymentToken.balanceOf(userA), paymentAmount + balanceBefore);
+        assertEq(mytho.balanceOf(userA), mythoAmount);
+        assertEq(lpToken.balanceOf(userA), lpAmount);
 
         assertEq(
             IERC20(totemTokenAddr).balanceOf(userA),
@@ -666,32 +686,35 @@ contract ComplexTest is Test {
 
         // End sale period to register the totem in MeritManager
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Get current period
         uint256 currentPeriod = mm.currentPeriod();
-        
+
         // Credit merit in current period
         prank(deployer);
         mm.creditMerit(data.totemAddr, 800);
-        
+
         // Warp to Mythum period (23/30 of the period duration)
         uint256 periodDuration = mm.periodDuration();
         uint256 mythumStart = (periodDuration * 23) / 30;
         warp(mythumStart + 1);
-        
+
         // Boost in Mythum period
         vm.deal(userA, 1 ether);
         prank(userA);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-        
+
         // Add additional merit
         prank(deployer);
         mm.creditMerit(data.totemAddr, 500);
 
         // Get actual merit points and adjust our expectations
-        uint256 actualMerit = mm.getTotemMeritPoints(data.totemAddr, currentPeriod);
+        uint256 actualMerit = mm.getTotemMeritPoints(
+            data.totemAddr,
+            currentPeriod
+        );
         console.log("Actual merit:", actualMerit);
-        
+
         // Just assert that we have merit points, the exact value may vary due to multipliers
         assertGt(actualMerit, 0);
 
@@ -699,18 +722,18 @@ contract ComplexTest is Test {
         warp(periodDuration + 1);
         prank(deployer);
         mm.updateState();
-        
+
         // Make sure the totem is registered in Merit Manager before claiming
         if (!mm.isRegisteredTotem(address(totem))) {
             prank(deployer);
             mm.register(address(totem));
         }
-        
+
         // Wait for MYTHO distribution
         warp(1 days);
         prank(deployer);
         mm.updateState(); // This will process any pending periods and distribute MYTHO
-        
+
         // Claim MYTHO from previous period
         prank(address(totem));
         totem.collectMYTH(currentPeriod);
@@ -719,16 +742,16 @@ contract ComplexTest is Test {
         warp(periodDuration + 1);
         prank(deployer);
         mm.updateState();
-        
+
         // Credit merit in new period
         prank(deployer);
         mm.creditMerit(data.totemAddr, 300);
-        
+
         // Warp to next period
         warp(periodDuration + 1);
         prank(deployer);
         mm.updateState();
-        
+
         // Claim MYTHO for the period with 300 merit
         prank(address(totem));
         totem.collectMYTH(currentPeriod + 2);
@@ -742,7 +765,7 @@ contract ComplexTest is Test {
 
         // End sale period
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Credit merit and move to next period to get MYTHO
         prank(deployer);
         mm.creditMerit(data.totemAddr, 1000);
@@ -829,7 +852,10 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(customToken)),
+            abi.encodeWithSelector(
+                TokenHoldersOracle.requestHoldersCount.selector,
+                address(customToken)
+            ),
             abi.encode()
         );
         factory.createTotemWithExistingToken(
@@ -992,7 +1018,10 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(customToken)),
+            abi.encodeWithSelector(
+                TokenHoldersOracle.requestHoldersCount.selector,
+                address(customToken)
+            ),
             abi.encode()
         );
         vm.expectRevert(
@@ -1430,7 +1459,7 @@ contract ComplexTest is Test {
         // Calculate the start of the Mythum period using the new formula
         // For a 20-day period: (20 days * 23) / 30 = 15 days (rounded down)
         uint256 mythumOffset = (20 days * 23) / 30; // = 15 days
-        
+
         // Warp to just before the Mythum period in the new period
         warp(mythumOffset - 1 days); // 30 + 14 = 44 days total
 
@@ -1445,13 +1474,13 @@ contract ComplexTest is Test {
 
         // Verify the start time of the Mythum period
         uint256 mythumStart = mm.getCurrentMythumStart();
-        
+
         // Check that the difference between the expected and actual times is no more than 1 second
         uint256 expectedStart = 30 days + mythumOffset;
         assertTrue(
-            mythumStart == expectedStart || 
-            mythumStart == expectedStart + 1 || 
-            mythumStart == expectedStart - 1
+            mythumStart == expectedStart ||
+                mythumStart == expectedStart + 1 ||
+                mythumStart == expectedStart - 1
         );
     }
 
@@ -1940,23 +1969,28 @@ contract ComplexTest is Test {
     function test_MeritManager_ViewFunctions() public {
         address totemTokenAddr = _createTotem(userA);
         TF.TotemData memory data = factory.getTotemData(0);
-        
+
         // End sale period
         _buyAllTotemTokens(totemTokenAddr);
-        
+
         // Get current period
         uint256 currentPeriod = mm.currentPeriod();
-        
+
         // Credit merit
         prank(deployer);
         mm.creditMerit(data.totemAddr, 1000);
 
         // Test getPendingReward - may be 0 if no MYTHO has been released yet
-        uint256 pendingReward = mm.getPendingReward(data.totemAddr, currentPeriod);
+        uint256 pendingReward = mm.getPendingReward(
+            data.totemAddr,
+            currentPeriod
+        );
         assertEq(pendingReward, 0);
 
         // Test getPeriodTimeBounds for current period
-        (uint256 startTime, uint256 endTime) = mm.getPeriodTimeBounds(currentPeriod);
+        (uint256 startTime, uint256 endTime) = mm.getPeriodTimeBounds(
+            currentPeriod
+        );
         assertTrue(startTime > 0);
         assertTrue(endTime > startTime);
 
@@ -1997,47 +2031,53 @@ contract ComplexTest is Test {
     function test_TokenHoldersOracle_NFT() public {
         // Deploy a mock ERC721 token
         MockERC721 nftToken = new MockERC721();
-        
+
         // Setup users with NFTs
         nftToken.mint(userA, 1);
         nftToken.mint(userB, 2);
         nftToken.mint(userC, 3);
-        
+
         // Deploy a new oracle for testing
         TokenHoldersOracle testOracle = new TokenHoldersOracle(
             address(0), // Router address (mock)
             address(treasury)
         );
-        
+
         // Test updateNFTHoldersCount with insufficient fee
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.0001 ether}(address(nftToken));
-        
+        testOracle.updateNFTHoldersCount{value: 0.0001 ether}(
+            address(nftToken)
+        );
+
         // Test updateNFTHoldersCount with non-NFT token
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(paymentToken));
-        
+        testOracle.updateNFTHoldersCount{value: 0.001 ether}(
+            address(paymentToken)
+        );
+
         // Test updateNFTHoldersCount with no NFT balance
         prank(userD); // userD has no NFTs
         vm.deal(userD, 1 ether);
         vm.expectRevert();
         testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(nftToken));
-        
+
         // Manually update holders count to simulate a successful update
         prank(deployer);
         testOracle.manuallyUpdateHoldersCount(address(nftToken), 3);
-        
+
         // Test isDataFresh
         bool isFresh = testOracle.isDataFresh(address(nftToken));
         assertTrue(isFresh);
-        
+
         // Test getHoldersCount
-        (uint256 count, uint256 timestamp) = testOracle.getHoldersCount(address(nftToken));
+        (uint256 count, uint256 timestamp) = testOracle.getHoldersCount(
+            address(nftToken)
+        );
         assertEq(count, 3);
         assertEq(timestamp, block.timestamp);
-        
+
         // Test updateNFTHoldersCount with fresh data
         prank(userA);
         vm.deal(userA, 1 ether);
@@ -2049,12 +2089,7 @@ contract ComplexTest is Test {
     function _createTotem(address _totemCreator) internal returns (address) {
         prank(_totemCreator);
         astrToken.approve(address(factory), factory.getCreationFee());
-        factory.createTotem(
-            "dataHash",
-            "TotemToken",
-            "TT",
-            new address[](0)
-        );
+        factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
         TF.TotemData memory totemData = factory.getTotemData(
             factory.getLastId() - 1
         );
@@ -2195,17 +2230,22 @@ contract ComplexTest is Test {
 
         // Deploy TokenHoldersOracle
         address routerAddress = makeAddr("chainlinkFunctionsRouter");
-        holdersOracle = new TokenHoldersOracle(routerAddress, address(treasury));
-        
+        holdersOracle = new TokenHoldersOracle(
+            routerAddress,
+            address(treasury)
+        );
+
         // Grant roles and set configuration
         holdersOracle.grantRole(holdersOracle.CALLER_ROLE(), address(factory));
         holdersOracle.setSubscriptionId(1);
         holdersOracle.setGasLimit(300000);
 
         // Register in AddressRegistry
-        registry.setAddress(bytes32("TOKEN_HOLDERS_ORACLE"), address(holdersOracle));
+        registry.setAddress(
+            bytes32("TOKEN_HOLDERS_ORACLE"),
+            address(holdersOracle)
+        );
     }
-        
 
     // Utility function to prank as a specific user
     function prank(address _user) internal {
