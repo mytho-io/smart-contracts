@@ -152,6 +152,12 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function redeemTotemTokens(uint256 _tokenAmountOrId) external whenNotPaused nonReentrant {
         if (tokenType == TokenType.STANDARD && !salePeriodEnded) revert SalePeriodNotEnded();
 
+        // Check if there are MYTHO tokens to claim in the current period
+        uint256 currentPeriod = MeritManager(meritManagerAddr).currentPeriod();
+        uint256 pendingReward = MeritManager(meritManagerAddr).getPendingReward(address(this), currentPeriod);
+        if (pendingReward > 0)
+            MeritManager(meritManagerAddr).claimMytho(currentPeriod);
+
         // Handle differently based on token type
         if (tokenType == TokenType.ERC721) {
             // For NFT tokens - pass the NFT ID
@@ -457,5 +463,62 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         // Calculate circulating supply
         return totalSupply - totemBalance - treasuryBalance;
+    }
+
+    /**
+     * @notice Calculates the amount of tokens a user would receive if they redeemed their totem tokens
+     * @param _tokenAmount The amount of ERC20 tokens to redeem (ignored for NFT tokens)
+     * @return paymentAmount The amount of payment tokens the user would receive
+     * @return mythoAmount The amount of MYTHO tokens the user would receive
+     * @return lpAmount The amount of LP tokens the user would receive
+     */
+    function estimateRedeemRewards(uint256 _tokenAmount) external view returns (
+        uint256 paymentAmount,
+        uint256 mythoAmount,
+        uint256 lpAmount
+    ) {
+        // Check if sale period has ended for standard tokens
+        if (tokenType == TokenType.STANDARD && !salePeriodEnded) {
+            return (0, 0, 0);
+        }
+        
+        // Get circulating supply
+        uint256 circulatingSupply = getCirculatingSupply();
+        if (circulatingSupply == 0) {
+            return (0, 0, 0);
+        }
+        
+        // Get balances to distribute
+        (
+            ,
+            uint256 paymentTokenBalance,
+            uint256 lpBalance,
+            uint256 mythoBalance
+        ) = getAllBalances();
+        
+        // Check if there are MYTHO tokens to claim in the current period
+        uint256 currentPeriod = MeritManager(meritManagerAddr).currentPeriod();
+        uint256 pendingReward = MeritManager(meritManagerAddr).getPendingReward(address(this), currentPeriod);
+        mythoBalance += pendingReward; // Add pending rewards to MYTHO balance
+        
+        // Check that the amount is not zero
+        if (_tokenAmount == 0) {
+            return (0, 0, 0);
+        }
+        
+        // For NFT always use 1 token, regardless of the value passed
+        uint256 effectiveAmount = tokenType == TokenType.ERC721 ? 1 : _tokenAmount;
+        
+        // Calculate user share for each token type based on circulating supply
+        paymentAmount = (paymentTokenBalance * effectiveAmount) / circulatingSupply;
+        mythoAmount = (mythoBalance * effectiveAmount) / circulatingSupply;
+        lpAmount = (lpBalance * effectiveAmount) / circulatingSupply;
+
+        if (tokenType == TokenType.ERC721) {
+            paymentAmount = 0;
+            lpAmount = 0;
+        }
+        
+        return (paymentAmount, mythoAmount, lpAmount);
     }
 }
