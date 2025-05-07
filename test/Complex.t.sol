@@ -430,9 +430,17 @@ contract ComplexTest is Test {
         TF.TotemData memory data = factory.getTotemData(0);
         Totem totem = Totem(data.totemAddr);
 
+        (, , address lpAddr) = totem.getTokenAddresses();
+        IERC20 lpToken = IERC20(lpAddr);
+
         prank(userA);
+        uint256 balanceBefore = paymentToken.balanceOf(userA);
         IERC20(totemTokenAddr).approve(address(totem), 50 ether);
+        (uint256 paymentAmount, uint256 mythoAmount, uint256 lpAmount) = totem.estimateRedeemRewards(50 ether);
         totem.redeemTotemTokens(50 ether);
+        assertEq(paymentToken.balanceOf(userA), paymentAmount + balanceBefore);
+        assertEq(mytho.balanceOf(userA), mythoAmount);
+        assertEq(lpToken.balanceOf(userA), lpAmount);
 
         assertEq(
             IERC20(totemTokenAddr).balanceOf(userA),
