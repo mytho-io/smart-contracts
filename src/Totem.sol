@@ -513,6 +513,11 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         paymentAmount = (paymentTokenBalance * effectiveAmount) / circulatingSupply;
         mythoAmount = (mythoBalance * effectiveAmount) / circulatingSupply;
         lpAmount = (lpBalance * effectiveAmount) / circulatingSupply;
+
+        if (tokenType == TokenType.ERC721) {
+            paymentAmount = 0;
+            lpAmount = 0;
+        }
         
         return (paymentAmount, mythoAmount, lpAmount);
     }
