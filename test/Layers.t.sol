@@ -906,7 +906,7 @@ contract LayersTest is Test {
         shards = Shards(address(shardProxy));
         shards.initialize(address(registry));
         
-        registry.setAddress(bytes32("SHARD_TOKEN"), address(shards));
+        registry.setAddress(bytes32("SHARDS"), address(shards));
 
         layers.setShardToken();
     }

@@ -23,7 +23,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR =
         "TOTEM_TOKEN_DISTRIBUTOR";
     bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
-    bytes32 private constant SHARD_TOKEN = "SHARD_TOKEN";
+    bytes32 private constant SHARDS = "SHARDS";
     bytes32 private constant LAYERS = "LAYERS";
 
     // Events
@@ -130,7 +130,7 @@ contract AddressRegistry is AccessControlUpgradeable {
      * @return Address of the ShardToken contract
      */
     function getShardToken() external view returns (address) {
-        return getAddress(SHARD_TOKEN);
+        return getAddress(SHARDS);
     }
 
     /**
