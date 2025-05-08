@@ -13,6 +13,7 @@ docs/
 .env
 
 flattened/
+src/forUpdate/
 
 promptDesc.txt
 promptCode.txt
