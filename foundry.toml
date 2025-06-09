@@ -1,0 +1,26 @@
+[profile.default]
+# evm_version = "london"
+src = "src"
+out = "out"
+libs = ["lib"]
+fs_permissions = [
+    { access = "read", path = "./src" },
+    { access = "read-write", path = "./combined" },
+    { access = "read-write", path = "./out" } 
+]
+
+unchecked_cheatcode_artifacts = true
+
+# See more config options https://github.com/foundry-rs/foundry/tree/master/config
+
+[rpc_endpoints]
+astar = "${ASTAR_RPC_URL}"
+localhost = "${LOCALHOST}"
+sepolia = "${SEPOLIA_RPC_URL}"
+minato = "${MINATO_RPC_URL}"
+shibuya = "${SHIBUYA_RPC_URL}"
+soneium = "${SONEIUM_RPC_URL}"
+ethereum = "${ETHEREUM_RPC_URL}"
+
+[fuzz]
+runs = 1000
