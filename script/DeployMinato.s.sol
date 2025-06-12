@@ -120,7 +120,7 @@ contract DeployMinato is Script {
             ""
         );
         mytho = MYTHO(address(mythoProxy));
-        mytho.initialize(address(mm), deployer, deployer, deployer, address(registry));
+        mytho.initialize(address(mm), address(registry));
 
         address[4] memory vestingAddresses = [
             mytho.meritVestingYear1(),

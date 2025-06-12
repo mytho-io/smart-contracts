@@ -47,7 +47,7 @@ contract DoHolderOracle is Script {
         // console.log("TokenHoldersOracle deployed at:", address(holdersOracle));
 
         // CHECK INFO
-        (uint256 number, ) = holdersOracle.getHoldersCount(tokenAddress);
+        (uint256 number, ) = holdersOracle.getNFTCount(tokenAddress);
         console.log("Nubmer of holders:", number);
     }
 

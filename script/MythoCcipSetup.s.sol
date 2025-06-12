@@ -141,7 +141,7 @@ contract MythoCcipSetup is Script {
             ""
         );
         MYTHO sourceToken = MYTHO(address(sourceProxy));
-        sourceToken.initialize(deployer, deployer, deployer, deployer, address(registry));
+        sourceToken.initialize(deployer, address(registry));
 
         LockReleaseTokenPool sourcePool = new LockReleaseTokenPool(
             IERC20(address(sourceToken)), // token
