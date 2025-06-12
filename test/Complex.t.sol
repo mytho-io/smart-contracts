@@ -95,9 +95,9 @@ contract ComplexTest is Test {
         vm.recordLogs();
         _createTotem(userA);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        (, , uint256 id) = abi.decode(
+        ( , , , , uint256 id) = abi.decode(
             logs[logs.length - 1].data,
-            (address, address, uint256)
+            (bytes, address, address, address, uint256)
         );
         assertEq(id, 0);
         assertEq(factory.getLastId(), 1);
@@ -171,7 +171,7 @@ contract ComplexTest is Test {
         vm.mockCall(
             address(holdersOracle),
             abi.encodeWithSelector(
-                TokenHoldersOracle.requestHoldersCount.selector,
+                TokenHoldersOracle.getNFTCount.selector,
                 address(customToken)
             ),
             abi.encode()
@@ -207,38 +207,35 @@ contract ComplexTest is Test {
     function test_TotemCreating_NFTToken() public {
         // Create a mock NFT
         MockERC721 nftToken = new MockERC721();
-
+        
         // Mint some NFTs to users
         nftToken.mint(userA, 1);
         nftToken.mint(userB, 2);
         nftToken.mint(userC, 3);
 
         vm.deal(userA, 1 ether);
-
+        
         // Authorize userA to create a totem with the NFT token
         prank(deployer);
         address[] memory usersToAuthorize = new address[](1);
         usersToAuthorize[0] = userA;
         factory.authorizeUsers(address(nftToken), usersToAuthorize);
-
+        
         // Get initial treasury balance
         uint256 initTreasuryBalanceInFeeTokens = IERC20(factory.getFeeToken())
             .balanceOf(address(treasury));
-
+            
         // Approve fee token for totem creation
         prank(userA);
         IERC20(factory.getFeeToken()).approve(
             address(factory),
             factory.getCreationFee()
         );
-
+        
         // Create totem with NFT token
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(
-                TokenHoldersOracle.requestHoldersCount.selector,
-                address(nftToken)
-            ),
+            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(nftToken)),
             abi.encode(0)
         );
 
@@ -247,32 +244,32 @@ contract ComplexTest is Test {
             address(nftToken),
             new address[](0)
         );
-
+        
         // Verify totem was created
         assertEq(factory.getLastId(), 1);
         assertEq(
             IERC20(factory.getFeeToken()).balanceOf(address(treasury)),
             initTreasuryBalanceInFeeTokens + factory.getCreationFee()
         );
-
+        
         // Get totem data
         TF.TotemData memory data = factory.getTotemData(0);
         assertEq(uint(data.tokenType), uint(TF.TokenType.ERC721));
         assertEq(data.totemTokenAddr, address(nftToken));
         assertEq(data.creator, userA);
-
+        
         // Get totem instance
         Totem totem = Totem(data.totemAddr);
-
-        // Manually update holders count in oracle (simulating Chainlink Functions response)
+        
+        // Manually update nft count in oracle (simulating Chainlink Functions response)
         prank(deployer);
-        holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3); // 3 NFT holders
-
+        holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3); // 3 NFT holders
+        
         // Test getCirculatingSupply for NFT
         prank(userA);
         uint256 circulatingSupply = totem.getCirculatingSupply();
         assertEq(circulatingSupply, 3); // Should be equal to number of NFT holders
-
+        
         // Test redeeming NFT tokens
         // First, we need to end the sale period
         prank(deployer);
@@ -280,14 +277,9 @@ contract ComplexTest is Test {
         address distributorAddr = registry.getTotemTokenDistributor();
         // Use the distributor to call endSalePeriod
         prank(distributorAddr);
-        Totem totemContract = Totem(
-            factory.getTotemData(factory.getLastId() - 1).totemAddr
-        );
-        totemContract.endSalePeriod(
-            IERC20(address(paymentToken)),
-            IERC20(address(0))
-        );
-
+        Totem totemContract = Totem(factory.getTotemData(factory.getLastId() - 1).totemAddr);
+        totemContract.endSalePeriod(IERC20(address(paymentToken)), IERC20(address(0)));
+        
         // Verify that the sale period has ended
         assertTrue(totemContract.isSalePeriodEnded());
 
@@ -296,8 +288,8 @@ contract ComplexTest is Test {
 
         vm.warp(60 days);
 
-        holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3);
-
+        holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3);        
+        
         // Now redeem tokens as userA (who holds NFT)
         prank(userA);
         totem.collectMYTH(mm.currentPeriod() - 1);
@@ -306,7 +298,7 @@ contract ComplexTest is Test {
 
         circulatingSupply = totem.getCirculatingSupply();
         assertEq(circulatingSupply, 2);
-
+        
         // Verify user received proportional assets
         // Since there are 3 NFT holders, each should get 1/3 of the rewards
         uint256 mythoBalance = mytho.balanceOf(userA);
@@ -853,7 +845,7 @@ contract ComplexTest is Test {
         vm.mockCall(
             address(holdersOracle),
             abi.encodeWithSelector(
-                TokenHoldersOracle.requestHoldersCount.selector,
+                TokenHoldersOracle.requestNFTCount.selector,
                 address(customToken)
             ),
             abi.encode()
@@ -1019,7 +1011,7 @@ contract ComplexTest is Test {
         vm.mockCall(
             address(holdersOracle),
             abi.encodeWithSelector(
-                TokenHoldersOracle.requestHoldersCount.selector,
+                TokenHoldersOracle.requestNFTCount.selector,
                 address(customToken)
             ),
             abi.encode()
@@ -2046,43 +2038,43 @@ contract ComplexTest is Test {
         // Test updateNFTHoldersCount with insufficient fee
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.0001 ether}(
+        testOracle.updateNFTCount{value: 0.0001 ether}(
             address(nftToken)
         );
 
-        // Test updateNFTHoldersCount with non-NFT token
+        // Test updateNFTCount with non-NFT token
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(
+        testOracle.updateNFTCount{value: 0.001 ether}(
             address(paymentToken)
         );
 
-        // Test updateNFTHoldersCount with no NFT balance
+        // Test updateNFTCount with no NFT balance
         prank(userD); // userD has no NFTs
         vm.deal(userD, 1 ether);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(nftToken));
+        testOracle.updateNFTCount{value: 0.001 ether}(address(nftToken));
 
         // Manually update holders count to simulate a successful update
         prank(deployer);
-        testOracle.manuallyUpdateHoldersCount(address(nftToken), 3);
+        testOracle.manuallyUpdateNFTCount(address(nftToken), 3);
 
         // Test isDataFresh
         bool isFresh = testOracle.isDataFresh(address(nftToken));
         assertTrue(isFresh);
 
-        // Test getHoldersCount
-        (uint256 count, uint256 timestamp) = testOracle.getHoldersCount(
+        // Test getNFTCount
+        (uint256 count, uint256 timestamp) = testOracle.getNFTCount(
             address(nftToken)
         );
         assertEq(count, 3);
         assertEq(timestamp, block.timestamp);
 
-        // Test updateNFTHoldersCount with fresh data
+        // Test updateNFTCount with fresh data
         prank(userA);
         vm.deal(userA, 1 ether);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(nftToken));
+        testOracle.updateNFTCount{value: 0.001 ether}(address(nftToken));
     }
 
     // Utility function to create a totem
@@ -2172,9 +2164,6 @@ contract ComplexTest is Test {
         mytho = MYTHO(address(mythoProxy));
         mytho.initialize(
             address(mm),
-            deployer,
-            deployer,
-            deployer,
             address(registry)
         );
 

@@ -83,9 +83,6 @@ contract CCIPTest is Test {
         mythoSource = MYTHO(address(mythoSourceProxy));
         mythoSource.initialize(
             deployer, // _meritManager
-            deployer, // _teamReceiver
-            deployer, // _treasuryReceiver
-            deployer, // _ammReceiver
             address(registry) // _registryAddr - use the actual registry contract
         );
 
@@ -130,15 +127,13 @@ contract CCIPTest is Test {
         // Transfer some MYTHO to the user for testing
         // Since MYTHO no longer has minting functionality, we'll transfer from treasury
         uint256 userAmount = 1000 ether;
-        address treasury = mythoSource.treasury();
 
         // Fund user with LINK for fees
         deal(linkTokenAddress, user, 100 ether);
 
         vm.stopPrank();
 
-        vm.prank(treasury);
-        mythoSource.transfer(user, userAmount);
+        deal(address(mythoSource), user, userAmount);
     }
 
     function testMYTHOSendingThroughCCIP() public {

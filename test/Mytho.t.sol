@@ -29,29 +29,21 @@ contract MythoTest is Test {
 
     address deployer;
     address meritManager;
-    address teamReceiver;
-    address treasuryReceiver;
-    address ammReceiver;
     address minter;
     address burner;
     address user;
     address manager;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
-    uint256 public constant MERIT_YEAR_1 = 200_000_000 * 10 ** 18;
-    uint256 public constant MERIT_YEAR_2 = 150_000_000 * 10 ** 18;
-    uint256 public constant MERIT_YEAR_3 = 100_000_000 * 10 ** 18;
-    uint256 public constant MERIT_YEAR_4 = 50_000_000 * 10 ** 18;
-    uint256 public constant TEAM_ALLOCATION = 200_000_000 * 10 ** 18;
-    uint256 public constant TREASURY_ALLOCATION = 230_000_000 * 10 ** 18;
-    uint256 public constant AMM_INCENTIVES = 70_000_000 * 10 ** 18;
+    uint256 public constant MERIT_YEAR_1 = 8_000_000 * 10 ** 18; // 40% of 20M
+    uint256 public constant MERIT_YEAR_2 = 6_000_000 * 10 ** 18; // 30% of 20M
+    uint256 public constant MERIT_YEAR_3 = 4_000_000 * 10 ** 18; // 20% of 20M
+    uint256 public constant MERIT_YEAR_4 = 2_000_000 * 10 ** 18; // 10% of 20M
+    uint256 public constant MERIT_TOTAL = MERIT_YEAR_1 + MERIT_YEAR_2 + MERIT_YEAR_3 + MERIT_YEAR_4; // 20M total
 
     function setUp() public {
         deployer = makeAddr("deployer");
         meritManager = makeAddr("meritManager");
-        teamReceiver = makeAddr("teamReceiver");
-        treasuryReceiver = makeAddr("treasuryReceiver");
-        ammReceiver = makeAddr("ammReceiver");
         minter = makeAddr("minter");
         burner = makeAddr("burner");
         user = makeAddr("user");
@@ -83,9 +75,6 @@ contract MythoTest is Test {
         bytes memory initData = abi.encodeWithSelector(
             MYTHO.initialize.selector,
             meritManager,
-            teamReceiver,
-            treasuryReceiver,
-            ammReceiver,
             address(registry)
         );
         
@@ -125,25 +114,28 @@ contract MythoTest is Test {
         assertEq(mytho.name(), "MYTHO Government Token");
         assertEq(mytho.symbol(), "MYTHO");
         
-        // Check total supply
-        assertEq(mytho.totalSupply(), TOTAL_SUPPLY);
+        // Check total supply (only merit tokens minted initially)
+        assertEq(mytho.totalSupply(), MERIT_TOTAL);
         
-        // Check owner
-        assertEq(mytho.owner(), deployer);
+        // Check total minted tracking
+        assertEq(mytho.totalMinted(), MERIT_TOTAL);
+        
+        // Check manager and multisig roles
+        assertTrue(mytho.hasRole(mytho.DEFAULT_ADMIN_ROLE(), deployer));
+        assertTrue(mytho.hasRole(mytho.MANAGER(), deployer));
+        assertTrue(mytho.hasRole(mytho.MULTISIG(), deployer));
         
         // Check vesting wallets have correct balances
         assertEq(mytho.balanceOf(mytho.meritVestingYear1()), MERIT_YEAR_1);
         assertEq(mytho.balanceOf(mytho.meritVestingYear2()), MERIT_YEAR_2);
         assertEq(mytho.balanceOf(mytho.meritVestingYear3()), MERIT_YEAR_3);
         assertEq(mytho.balanceOf(mytho.meritVestingYear4()), MERIT_YEAR_4);
-        assertEq(mytho.balanceOf(mytho.teamVesting()), TEAM_ALLOCATION);
-        assertEq(mytho.balanceOf(mytho.ammVesting()), AMM_INCENTIVES);
-        assertEq(mytho.balanceOf(mytho.treasury()), TREASURY_ALLOCATION);
         
         // Verify vesting wallet beneficiaries (owner is the beneficiary in VestingWallet)
         assertEq(VestingWallet(payable(mytho.meritVestingYear1())).owner(), meritManager);
-        assertEq(VestingWallet(payable(mytho.teamVesting())).owner(), teamReceiver);
-        assertEq(VestingWallet(payable(mytho.ammVesting())).owner(), ammReceiver);
+        assertEq(VestingWallet(payable(mytho.meritVestingYear2())).owner(), meritManager);
+        assertEq(VestingWallet(payable(mytho.meritVestingYear3())).owner(), meritManager);
+        assertEq(VestingWallet(payable(mytho.meritVestingYear4())).owner(), meritManager);
     }
 
     function test_InitializeWithZeroAddress() public {
@@ -156,30 +148,24 @@ contract MythoTest is Test {
         bytes memory initData = abi.encodeWithSelector(
             MYTHO.initialize.selector,
             address(0),
-            teamReceiver,
-            treasuryReceiver,
-            ammReceiver,
             address(registry)
         );
         
-        vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "totem receiver"));
+        vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "merit manager"));
         newProxy = new TransparentUpgradeableProxy(
             address(newImpl),
             address(proxyAdmin),
             initData
         );
         
-        // Test with zero address for teamReceiver
+        // Test with zero address for registry
         initData = abi.encodeWithSelector(
             MYTHO.initialize.selector,
             meritManager,
-            address(0),
-            treasuryReceiver,
-            ammReceiver,
-            address(registry)
+            address(0)
         );
         
-        vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "team receiver"));
+        vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "registry"));
         newProxy = new TransparentUpgradeableProxy(
             address(newImpl),
             address(proxyAdmin),
@@ -187,6 +173,55 @@ contract MythoTest is Test {
         );
         
         vm.stopPrank();
+    }
+
+    function test_CreateVesting() public {
+        address beneficiary = makeAddr("beneficiary");
+        uint256 amount = 1000 * 10**18;
+        uint64 startTime = uint64(block.timestamp) + 1 days;
+        uint64 duration = 365 days;
+        
+        // Only MULTISIG role can create vesting
+        vm.prank(user);
+        vm.expectRevert();
+        mytho.createVesting(beneficiary, amount, startTime, duration);
+        
+        // Create vesting with MULTISIG role
+        vm.prank(deployer); // deployer has MULTISIG role
+        address vestingWallet = mytho.createVesting(beneficiary, amount, startTime, duration);
+        
+        // Check vesting wallet was created correctly
+        VestingWallet vesting = VestingWallet(payable(vestingWallet));
+        assertEq(vesting.owner(), beneficiary);
+        assertEq(vesting.start(), startTime);
+        assertEq(vesting.duration(), duration);
+        assertEq(mytho.balanceOf(vestingWallet), amount);
+        
+        // Check total supply and totalMinted updated
+        assertEq(mytho.totalSupply(), MERIT_TOTAL + amount);
+        assertEq(mytho.totalMinted(), MERIT_TOTAL + amount);
+    }
+
+    function test_CreateVestingWithZeroAddress() public {
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(MYTHO.ZeroAddressNotAllowed.selector, "beneficiary"));
+        mytho.createVesting(address(0), 1000 * 10**18, uint64(block.timestamp), 365 days);
+    }
+
+    function test_CreateVestingWithZeroAmount() public {
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(MYTHO.InvalidAmount.selector));
+        mytho.createVesting(user, 0, uint64(block.timestamp), 365 days);
+    }
+
+    function test_CreateVestingExceedsMaxSupply() public {
+        // Try to mint more than the remaining supply
+        uint256 remainingSupply = TOTAL_SUPPLY - MERIT_TOTAL;
+        uint256 excessiveAmount = remainingSupply + 1;
+        
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(MYTHO.ExceedsMaxSupply.selector));
+        mytho.createVesting(user, excessiveAmount, uint64(block.timestamp), 365 days);
     }
 
     // Test BurnMintMYTHO minting permissions (for non-native chains)
@@ -288,37 +323,58 @@ contract MythoTest is Test {
         // Initially token should not be paused
         assertFalse(mytho.paused());
         
-        // Only owner can pause
+        // Create some tokens first BEFORE pausing to test transfers
+        vm.prank(deployer);
+        address testVesting = mytho.createVesting(user, 1000 * 10**18, uint64(block.timestamp), 365 days);
+        
+        // Release some tokens from vesting to user
+        vm.warp(block.timestamp + 180 days); // 50% vested
         vm.prank(user);
-        vm.expectRevert();  // Just expect any revert for non-owner
+        VestingWallet(payable(testVesting)).release(address(mytho));
+        
+        uint256 userBalance = mytho.balanceOf(user);
+        assertTrue(userBalance > 0);
+        
+        // Only MANAGER role can pause
+        vm.prank(user);
+        vm.expectRevert();  // Just expect any revert for non-manager
         mytho.pause();
         
-        // Owner pauses the token
-        vm.prank(deployer);
+        // Manager pauses the token
+        vm.prank(deployer); // deployer has MANAGER role
         mytho.pause();
         assertTrue(mytho.paused());
         
         // Transfers should be blocked when paused
-        vm.prank(treasuryReceiver);
+        vm.prank(user);
         vm.expectRevert(); // Just expect any revert when paused
         mytho.transfer(address(1), 100 * 10**18);
         
-        // Only owner can unpause
+        // Creating vesting should also be blocked when paused
+        vm.prank(deployer);
+        vm.expectRevert(); // Just expect any revert when paused
+        mytho.createVesting(makeAddr("newUser"), 500 * 10**18, uint64(block.timestamp), 365 days);
+        
+        // Only MANAGER role can unpause
         vm.prank(user);
-        vm.expectRevert();  // Just expect any revert for non-owner
+        vm.expectRevert();  // Just expect any revert for non-manager
         mytho.unpause();
         
-        // Owner unpauses the token
+        // Manager unpauses the token
         vm.prank(deployer);
         mytho.unpause();
         assertFalse(mytho.paused());
         
         // After unpausing, transfers should work again
-        uint256 treasuryBalance = mytho.balanceOf(treasuryReceiver);
-        vm.prank(treasuryReceiver);
+        vm.prank(user);
         mytho.transfer(address(1), 100 * 10**18);
         assertEq(mytho.balanceOf(address(1)), 100 * 10**18);
-        assertEq(mytho.balanceOf(treasuryReceiver), treasuryBalance - 100 * 10**18);
+        assertEq(mytho.balanceOf(user), userBalance - 100 * 10**18);
+        
+        // After unpausing, creating vesting should work again
+        vm.prank(deployer);
+        address newVesting = mytho.createVesting(makeAddr("newUser"), 500 * 10**18, uint64(block.timestamp), 365 days);
+        assertEq(mytho.balanceOf(newVesting), 500 * 10**18);
     }
     
     // Test BurnMintMYTHO pause/unpause functionality
@@ -423,12 +479,22 @@ contract MythoTest is Test {
         // Initially ecosystem should not be paused
         assertFalse(registry.isEcosystemPaused());
         
+        // Create some tokens first to test transfers
+        vm.prank(deployer);
+        address testVesting = mytho.createVesting(user, 2000 * 10**18, uint64(block.timestamp), 365 days);
+        
+        // Release some tokens from vesting to user
+        vm.warp(block.timestamp + 180 days); // 50% vested
+        vm.prank(user);
+        VestingWallet(payable(testVesting)).release(address(mytho));
+        
+        uint256 userBalance = mytho.balanceOf(user);
+        assertTrue(userBalance > 0);
+        
         // Transfer should work when ecosystem is not paused
-        uint256 treasuryBalance = mytho.balanceOf(treasuryReceiver);
-        vm.prank(treasuryReceiver);
-        mytho.transfer(user, 1000 * 10**18);
-        assertEq(mytho.balanceOf(user), 1000 * 10**18);
-        assertEq(mytho.balanceOf(treasuryReceiver), treasuryBalance - 1000 * 10**18);
+        vm.prank(user);
+        mytho.transfer(manager, 500 * 10**18);
+        assertEq(mytho.balanceOf(manager), 500 * 10**18);
         
         // Pause the ecosystem
         vm.prank(manager);
@@ -436,9 +502,9 @@ contract MythoTest is Test {
         assertTrue(registry.isEcosystemPaused());
         
         // Transfer should be blocked when ecosystem is paused
-        vm.prank(treasuryReceiver);
+        vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(MYTHO.EcosystemPaused.selector));
-        mytho.transfer(user, 1000 * 10**18);
+        mytho.transfer(manager, 200 * 10**18);
         
         // Unpause the ecosystem
         vm.prank(manager);
@@ -446,11 +512,14 @@ contract MythoTest is Test {
         assertFalse(registry.isEcosystemPaused());
         
         // Transfer should work again after ecosystem is unpaused
-        treasuryBalance = mytho.balanceOf(treasuryReceiver);
-        vm.prank(treasuryReceiver);
-        mytho.transfer(user, 1000 * 10**18);
-        assertEq(mytho.balanceOf(user), 2000 * 10**18);
-        assertEq(mytho.balanceOf(treasuryReceiver), treasuryBalance - 1000 * 10**18);
+        uint256 managerBalanceBefore = mytho.balanceOf(manager);
+        uint256 userBalanceBefore = mytho.balanceOf(user);
+        uint256 transferAmount = 200 * 10**18;
+        
+        vm.prank(user);
+        mytho.transfer(manager, transferAmount);
+        assertEq(mytho.balanceOf(manager), managerBalanceBefore + transferAmount);
+        assertEq(mytho.balanceOf(user), userBalanceBefore - transferAmount);
     }
     
     function test_VestingSchedule() public {
@@ -459,43 +528,32 @@ contract MythoTest is Test {
         address meritVestingYear2 = mytho.meritVestingYear2();
         address meritVestingYear3 = mytho.meritVestingYear3();
         address meritVestingYear4 = mytho.meritVestingYear4();
-        address teamVesting = mytho.teamVesting();
-        address ammVesting = mytho.ammVesting();
         
         // Check initial balances
         assertEq(mytho.balanceOf(meritVestingYear1), MERIT_YEAR_1);
         assertEq(mytho.balanceOf(meritVestingYear2), MERIT_YEAR_2);
         assertEq(mytho.balanceOf(meritVestingYear3), MERIT_YEAR_3);
         assertEq(mytho.balanceOf(meritVestingYear4), MERIT_YEAR_4);
-        assertEq(mytho.balanceOf(teamVesting), TEAM_ALLOCATION);
-        assertEq(mytho.balanceOf(ammVesting), AMM_INCENTIVES);
         
         // Check vesting duration and start time
         VestingWallet meritVesting1 = VestingWallet(payable(meritVestingYear1));
         VestingWallet meritVesting2 = VestingWallet(payable(meritVestingYear2));
         VestingWallet meritVesting3 = VestingWallet(payable(meritVestingYear3));
         VestingWallet meritVesting4 = VestingWallet(payable(meritVestingYear4));
-        VestingWallet teamVestingWallet = VestingWallet(payable(teamVesting));
-        VestingWallet ammVestingWallet = VestingWallet(payable(ammVesting));
         
         // Check beneficiaries (owner is the beneficiary in VestingWallet)
         assertEq(meritVesting1.owner(), meritManager);
         assertEq(meritVesting2.owner(), meritManager);
         assertEq(meritVesting3.owner(), meritManager);
         assertEq(meritVesting4.owner(), meritManager);
-        assertEq(teamVestingWallet.owner(), teamReceiver);
-        assertEq(ammVestingWallet.owner(), ammReceiver);
         
         // Check vesting duration
         uint64 ONE_YEAR = 12 * 30 days;
-        uint64 TWO_YEARS = 2 * ONE_YEAR;
         
         assertEq(meritVesting1.duration(), ONE_YEAR);
         assertEq(meritVesting2.duration(), ONE_YEAR);
         assertEq(meritVesting3.duration(), ONE_YEAR);
         assertEq(meritVesting4.duration(), ONE_YEAR);
-        assertEq(teamVestingWallet.duration(), TWO_YEARS);
-        assertEq(ammVestingWallet.duration(), TWO_YEARS);
         
         // Check start times for sequential vesting
         uint64 startTime = uint64(meritVesting1.start());

@@ -35,7 +35,7 @@ contract VestingTest is Test {
             ""
         );
         mytho = MYTHO(address(mythoProxy));
-        mytho.initialize(deployer, deployer, deployer, deployer, address(registry));
+        mytho.initialize(deployer, address(registry));
         vestingWallet = new VestingWallet(beneficiaryA, 100, 1000);
         deal(address(mytho), address(vestingWallet), 100e18);
     }
