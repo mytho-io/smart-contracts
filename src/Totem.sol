@@ -452,7 +452,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             TokenHoldersOracle oracle = TokenHoldersOracle(AddressRegistry(registryAddr).getTokenHoldersOracle());
             // For NFTs, get holder count from oracle
             if (address(oracle) != address(0)) {
-                (totalSupply, ) = oracle.getHoldersCount(totemTokenAddr);
+                (totalSupply, ) = oracle.getNFTCount(totemTokenAddr);
             } else {
                 return 0; // No oracle data available
             }
