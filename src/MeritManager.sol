@@ -119,10 +119,10 @@ contract MeritManager is
         periodDuration = 30 days;
         startTime = block.timestamp; // Initially set to deployment timestamp
         vestingWalletsAllocation = [
-            200_000_000 ether,
-            150_000_000 ether,
-            100_000_000 ether,
-            50_000_000 ether
+            8_000_000 ether,
+            6_000_000 ether,
+            4_000_000 ether,
+            2_000_000 ether
         ];
 
         oneTotemBoost = 10; // 10 merit points per boost initially
@@ -272,7 +272,6 @@ contract MeritManager is
         address _totem,
         bool _blacklisted
     ) external onlyRole(MANAGER) {
-        if (!registeredTotems[_totem]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totem) && _blacklisted)
             revert AlreadyBlacklisted(_totem);
         if (!hasRole(BLACKLISTED, _totem) && !_blacklisted)
@@ -414,7 +413,7 @@ contract MeritManager is
                 emit MythoReleased(releasedMytho[period], period);
             }
 
-            wallet.release(address(mythoToken));
+            wallet.release(mythoToken);
             lastProcessedPeriod = _currentPeriod;
         }
     }
