@@ -65,8 +65,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
     bytes4 private constant ERC721_INTERFACE_ID = 0x80ac58cd;
 
     // Events
-    event TotemCreated(address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
-    event TotemWithExistingTokenCreated(address totemAddr, address totemTokenAddr, uint256 totemId, TokenType tokenType); // prettier-ignore
+    event TotemCreated(bytes dataHash, address creator, address totemAddr, address totemTokenAddr, uint256 totemId); // prettier-ignore
+    event TotemWithExistingTokenCreated(bytes dataHash, address creator, address totemAddr, address totemTokenAddr, uint256 totemId, TokenType tokenType); // prettier-ignore
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address oldToken, address newToken);
     event BatchWhitelistUpdated(address[] tokens, bool isAdded);
@@ -179,12 +179,13 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         // register the totem and make initial tokens distribution
         totemDistributor.register();
 
-        emit TotemCreated(address(proxy), address(totemToken), lastId - 1);
+        emit TotemCreated(_dataHash, msg.sender, address(proxy), address(totemToken), lastId - 1);
     }
 
     /**
      * @notice Creates a new totem with an existing whitelisted token
      *      Uses an existing token instead of deploying a new one
+     *      Supports both ERC20 and ERC721 token standards
      * @param _dataHash The hash of the totem data
      * @param _tokenAddr The address of the existing token
      * @param _collaborators Array of collaborator addresses
@@ -217,7 +218,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
             TokenHoldersOracle oracle = TokenHoldersOracle(AddressRegistry(registryAddr).getTokenHoldersOracle());
             
             // Request initial holders count from oracle
-            oracle.requestHoldersCount(_tokenAddr);
+            oracle.requestNFTCount(_tokenAddr);
         }
 
         BeaconProxy proxy = new BeaconProxy(
@@ -247,6 +248,8 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         MeritManager(meritManagerAddr).register(address(proxy));
 
         emit TotemWithExistingTokenCreated(
+            _dataHash,
+            msg.sender,
             address(proxy),
             _tokenAddr,
             lastId - 1,
