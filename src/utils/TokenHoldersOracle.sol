@@ -10,7 +10,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 /**
  * @title TokenHoldersOracle
- * @notice Oracle contract that fetches token holder counts from Blockscout API using Chainlink Functions
+ * @notice Oracle contract that fetches total NFT counts from Blockscout API using Chainlink Functions
  * @dev Uses Chainlink Functions to make HTTP requests to Blockscout API
  */
 contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
@@ -28,17 +28,17 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
     address private mythoTreasuryAddr;
 
     /**
-     * @notice Structure to store token holder information
-     * @param holdersCount Number of token holders
+     * @notice Structure to store token NFT information
+     * @param nftCount Total number of NFT instances
      * @param lastUpdateTimestamp Timestamp of the last update
      */
     struct TokenInfo {
-        uint256 holdersCount;
+        uint256 nftCount;
         uint256 lastUpdateTimestamp;
     }
 
-    // Mapping from token address to its holder information
-    mapping(address => TokenInfo) public tokenHolders;
+    // Mapping from token address to its NFT information
+    mapping(address => TokenInfo) public tokenNFTs;
 
     // Chainlink Functions DON ID for Soneium network
     bytes32 public constant donId =
@@ -55,28 +55,28 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
 
     /**
      * @notice JavaScript source code for Chainlink Functions
-     * @dev Makes HTTP request to Blockscout API to get token holder count
+     * @dev Makes HTTP request to Blockscout API to get total NFT count
      */
     string private constant source =
         "const tokenAddress = args[0]; "
-        "let holdersCount = null; "
+        "let nftCount = null; "
         "try { "
         "  const response = await Functions.makeHttpRequest({ "
-        "    url: `https://soneium.blockscout.com/api/v2/tokens/${tokenAddress}/counters` "
+        "    url: `https://soneium.blockscout.com/api/v2/tokens/${tokenAddress}/instances` "
         "  }); "
-        "  if (response.data && response.data.token_holders_count) { "
-        "    holdersCount = parseInt(response.data.token_holders_count, 10); "
+        "  if (response.data && response.data.items) { "
+        "    nftCount = response.data.items.length; "
         "  } "
         "} catch (e) { "
-        "  throw Error('Failed to fetch holders count from Blockscout API'); "
+        "  throw Error('Failed to fetch NFT instances from Blockscout API'); "
         "} "
-        "if (holdersCount === null) { "
+        "if (nftCount === null) { "
         "  throw Error('Invalid response from Blockscout API'); "
         "} "
-        "return Functions.encodeUint256(holdersCount);";
+        "return Functions.encodeUint256(nftCount);";
 
     // Events
-    event HoldersCountUpdated(
+    event NFTCountUpdated(
         address indexed token,
         uint256 count,
         uint256 timestamp
@@ -116,24 +116,24 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
     // EXTERNAL FUNCTIONS
 
     /**
-     * @notice Requests the current holders count for a token
+     * @notice Requests the current NFT count for a token
      * @dev Uses Chainlink Functions to fetch data from Blockscout API
      * @param _tokenAddress The address of the token to query
      * @return requestId The ID of the Chainlink Functions request
      */
-    function requestHoldersCount(
+    function requestNFTCount(
         address _tokenAddress
     ) external onlyRole(CALLER_ROLE) returns (bytes32 requestId) {
-        lastRequestId = _sendHoldersCountRequest(_tokenAddress);
+        lastRequestId = _sendNFTCountRequest(_tokenAddress);
         return lastRequestId;
     }
 
     /**
-     * @notice Allows NFT holders to update the holder count for their NFT
+     * @notice Allows NFT holders to update the NFT count for their NFT
      * @dev Requires payment of updateFee in native tokens
      * @param _nftAddress The address of the NFT to update
      */
-    function updateNFTHoldersCount(address _nftAddress) external payable {
+    function updateNFTCount(address _nftAddress) external payable {
         // Verify the token is an NFT (ERC721)
         if (!IERC721(_nftAddress).supportsInterface(0x80ac58cd))
             revert NotERC721Token();
@@ -149,7 +149,7 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
         if (isDataFresh(_nftAddress)) revert DataAlreadyFresh();
 
         // Send the Chainlink Functions request
-        lastRequestId = _sendHoldersCountRequest(_nftAddress);
+        lastRequestId = _sendNFTCountRequest(_nftAddress);
 
         // Transfer fee to the MYTHO treasury
         if (mythoTreasuryAddr == address(0)) revert TreasuryNotSet();
@@ -169,12 +169,12 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
     // ADMIN FUNCTIONS
 
     /**
-     * @notice Manually updates the holders count for a token (emergency use only)
+     * @notice Manually updates the NFT count for a token (emergency use only)
      * @dev Only callable by admin, used when Chainlink Functions fails
      * @param _tokenAddress The address of the token to update
-     * @param _count The number of token holders
+     * @param _count The total number of NFT instances
      */
-    function manuallyUpdateHoldersCount(
+    function manuallyUpdateNFTCount(
         address _tokenAddress,
         uint256 _count
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -184,14 +184,14 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
         // Get current timestamp
         uint256 timestamp = block.timestamp;
 
-        // Update the token holder information
-        tokenHolders[_tokenAddress] = TokenInfo({
-            holdersCount: _count,
+        // Update the token NFT information
+        tokenNFTs[_tokenAddress] = TokenInfo({
+            nftCount: _count,
             lastUpdateTimestamp: timestamp
         });
 
         // Emit events for tracking
-        emit HoldersCountUpdated(_tokenAddress, _count, timestamp);
+        emit NFTCountUpdated(_tokenAddress, _count, timestamp);
         emit ManualUpdate(_tokenAddress, _count, msg.sender);
     }
 
@@ -259,11 +259,11 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
 
     /**
      * @notice Internal function to send a Chainlink Functions request
-     * @dev Common logic for both requestHoldersCount and updateNFTHoldersCount
+     * @dev Common logic for both requestNFTCount and updateNFTCount
      * @param _tokenAddress The address of the token to query
      * @return requestId The ID of the Chainlink Functions request
      */
-    function _sendHoldersCountRequest(
+    function _sendNFTCountRequest(
         address _tokenAddress
     ) internal returns (bytes32 requestId) {
         // Store the token address for use in the callback
@@ -300,42 +300,42 @@ contract TokenHoldersOracle is FunctionsClient, ConfirmedOwner, AccessControl {
             return;
         }
 
-        // Decode the response (holder count)
+        // Decode the response (NFT count)
         uint256 count = abi.decode(response, (uint256));
         uint256 timestamp = block.timestamp;
 
-        // Update the token holder information
-        tokenHolders[lastQueriedToken] = TokenInfo({
-            holdersCount: count,
+        // Update the token NFT information
+        tokenNFTs[lastQueriedToken] = TokenInfo({
+            nftCount: count,
             lastUpdateTimestamp: timestamp
         });
 
         // Emit event for tracking
-        emit HoldersCountUpdated(lastQueriedToken, count, timestamp);
+        emit NFTCountUpdated(lastQueriedToken, count, timestamp);
     }
 
     // VIEW FUNCTIONS
 
     /**
-     * @notice Gets the current holders count and last update timestamp for a token
+     * @notice Gets the current NFT count and last update timestamp for a token
      * @param _tokenAddress The address of the token to query
-     * @return count The number of token holders
+     * @return count The total number of NFT instances
      * @return lastUpdate The timestamp of the last update
      */
-    function getHoldersCount(
+    function getNFTCount(
         address _tokenAddress
     ) external view returns (uint256 count, uint256 lastUpdate) {
-        TokenInfo memory info = tokenHolders[_tokenAddress];
-        return (info.holdersCount, info.lastUpdateTimestamp);
+        TokenInfo memory info = tokenNFTs[_tokenAddress];
+        return (info.nftCount, info.lastUpdateTimestamp);
     }
 
     /**
-     * @notice Checks if the holder count data is fresh (less than maxDataAge old)
+     * @notice Checks if the NFT count data is fresh (less than maxDataAge old)
      * @param _tokenAddress The address of the token to check
      * @return True if the data is fresh, false otherwise
      */
     function isDataFresh(address _tokenAddress) public view returns (bool) {
-        TokenInfo memory info = tokenHolders[_tokenAddress];
+        TokenInfo memory info = tokenNFTs[_tokenAddress];
         return (block.timestamp - info.lastUpdateTimestamp) <= maxDataAge;
     }
 
