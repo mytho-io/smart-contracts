@@ -83,40 +83,13 @@ contract TotemTokenDistributor is
     }
 
     // Events
-    event TotemTokensBought(
-        address buyer,
-        address paymentTokenAddr,
-        address totemTokenAddr,
-        uint256 totemTokenAmount,
-        uint256 paymentTokenAmount
-    );
-    event TotemTokensSold(
-        address buyer,
-        address paymentTokenAddr,
-        address totemTokenAddr,
-        uint256 totemTokenAmount,
-        uint256 paymentTokenAmount
-    );
-    event TotemRegistered(
-        address totemAddr,
-        address creator,
-        address totemTokenAddr
-    );
-    event SalePeriodClosed(address totemTokenAddr, uint256 totalCollected);
-    event LiquidityAdded(
-        address totemTokenAddr,
-        address paymentTokenAddr,
-        uint256 totemAmount,
-        uint256 paymentAmount,
-        uint256 liquidity
-    );
-    event TokenDistributionSharesUpdated(
-        uint256 revenueShare,
-        uint256 creatorShare,
-        uint256 poolShare,
-        uint256 vaultShare
-    );
-    event PriceFeedSet(address tokenAddr, address priceFeedAddr);
+    event TotemTokensBought(address buyer, address paymentTokenAddr, address totemTokenAddr, uint256 totemTokenAmount, uint256 paymentTokenAmount); // prettier-ignore
+    event TotemTokensSold(address buyer, address paymentTokenAddr, address totemTokenAddr, uint256 totemTokenAmount, uint256 paymentTokenAmount); // prettier-ignore
+    event TotemRegistered(address totemAddr, address creator, address totemTokenAddr); // prettier-ignore
+    event SalePeriodClosed(address totemTokenAddr, uint256 totalCollected); // prettier-ignore
+    event LiquidityAdded(address totemTokenAddr, address paymentTokenAddr, uint256 totemAmount, uint256 paymentAmount, uint256 liquidity); // prettier-ignore
+    event TokenDistributionSharesUpdated(uint256 revenueShare, uint256 creatorShare, uint256 poolShare, uint256 vaultShare); // prettier-ignore
+    event PriceFeedSet(address tokenAddr, address priceFeedAddr); // prettier-ignore
 
     // Custom errors
     error AlreadyRegistered(address totemTokenAddr);
@@ -156,7 +129,7 @@ contract TotemTokenDistributor is
         meritManager = MeritManager(registry.getMeritManager());
 
         maxTokensPerAddress = 5_000_000 ether;
-        oneTotemPriceInUsd = 0.00004 ether;
+        oneTotemPriceInUsd = 0.000005 ether;
 
         // Initialize distribution shares
         revenuePaymentTokenShare = 250; // 2.5%
@@ -785,5 +758,14 @@ contract TotemTokenDistributor is
      */
     function getSlippagePercentage() external view returns (uint256) {
         return slippagePercentage;
+    }
+    
+    /**
+     * @notice Checks if a totem token is registered
+     * @param _totemTokenAddr Address of the totem token
+     * @return Boolean indicating if the totem is registered
+     */
+    function isTotemRegistered(address _totemTokenAddr) external view returns (bool) {
+        return totems[_totemTokenAddr].registered;
     }
 }
