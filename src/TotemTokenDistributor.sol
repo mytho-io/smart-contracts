@@ -581,7 +581,7 @@ contract TotemTokenDistributor is
         uint256 _totemsAmount
     ) public view returns (uint256) {
         uint256 amount = (_totemsAmount * oneTotemPriceInUsd) /
-            getPrice(_tokenAddr);
+            (getPrice(_tokenAddr) * 1e10); // Convert 8 decimals to 18 decimals
         return amount == 0 ? 1 : amount;
     }
 
@@ -595,7 +595,7 @@ contract TotemTokenDistributor is
         address _tokenAddr,
         uint256 _paymentTokenAmount
     ) external view returns (uint256) {
-        uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr)) /
+        uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr) * 1e10) /
             oneTotemPriceInUsd;
         return amount == 0 ? 1 : amount;
     }
@@ -604,7 +604,7 @@ contract TotemTokenDistributor is
      * @notice Returns the price of a given token in USD
      *      Uses Chainlink price feeds to get the token price in USD
      * @param _tokenAddr Address of the token to get the price for
-     * @return Amount of tokens equivalent to 1 USD
+     * @return USD price per token (8 decimals, as returned by Chainlink)
      */
     function getPrice(address _tokenAddr) public view returns (uint256) {
         address priceFeedAddr = priceFeedAddresses[_tokenAddr];
@@ -616,37 +616,18 @@ contract TotemTokenDistributor is
         // Get the latest price from Chainlink
         AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddr);
         (
-            uint80 roundId,
+            ,
             int256 price,
             ,
-            uint256 updatedAt,
-            uint80 answeredInRound
+            ,
+            
         ) = priceFeed.latestRoundData();
 
         // Validate the price feed data
         if (price <= 0) revert InvalidPrice(_tokenAddr);
-        if (answeredInRound < roundId) revert StalePrice(_tokenAddr);
-        if (block.timestamp > updatedAt + PRICE_FEED_STALE_THRESHOLD)
-            revert StalePrice(_tokenAddr);
 
-        // Get the number of decimals in the price feed
-        uint8 decimals = priceFeed.decimals();
-
-        // Calculate how many tokens are equivalent to 1 USD
-        // Price from Chainlink is in USD per token with 'decimals' decimal places
-        // We want tokens per USD with 18 decimal places
-
-        // First, normalize the price to 18 decimals
-        uint256 normalizedPrice;
-        if (decimals < 18) {
-            normalizedPrice = uint256(price) * (10 ** (18 - decimals));
-        } else {
-            normalizedPrice = uint256(price) / (10 ** (decimals - 18));
-        }
-
-        // Then calculate tokens per USD: 1e36 / price
-        // 1e36 = 1 USD (with 18 decimals) * 1e18 (for division precision)
-        return (1e36) / normalizedPrice;
+        // Return the raw price from Chainlink (8 decimals)
+        return uint256(price);
     }
 
     /**
