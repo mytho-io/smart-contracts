@@ -76,7 +76,7 @@ contract MYTHO is
         address _meritManager,
         address _registryAddr
     ) public initializer {
-        __ERC20_init("MYTHO Government Token", "MYTHO");
+        __ERC20_init("MYTHO Governance Token", "MYTHO");
         __ERC20Pausable_init();
         __AccessControl_init();
 
