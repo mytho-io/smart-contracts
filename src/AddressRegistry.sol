@@ -25,6 +25,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
     bytes32 private constant SHARD_TOKEN = "SHARD_TOKEN";
     bytes32 private constant LAYERS = "LAYERS";
+    bytes32 private constant MULTISIG_WALLET = "MULTISIG_WALLET";
 
     // Events
     event AddressSet(bytes32 indexed id, address oldAddress, address newAddress); // prettier-ignore
@@ -147,6 +148,14 @@ contract AddressRegistry is AccessControlUpgradeable {
      */
     function getTokenHoldersOracle() external view returns (address) {
         return getAddress(TOKEN_HOLDERS_ORACLE);
+    }
+
+    /**
+     * @notice Gets the address of the MultisigWallet contract
+     * @return Address of the MultisigWallet contract
+     */
+    function getMultisigWallet() external view returns (address) {
+        return getAddress(MULTISIG_WALLET);
     }
 
     /**

@@ -63,6 +63,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     );
     event SalePeriodEnded();
     event MythoCollected(address indexed user, uint256 periodNum);
+    event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
 
     // Custom errors
     error SalePeriodNotEnded();
@@ -75,6 +76,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     error EcosystemPaused();
     error StaleOracleData();
     error UnsupportedTokenType();
+    error NotMultisigWallet();
 
     /**
      * @notice Modifier to check if Totems are paused or if the ecosystem is paused in the AddressRegistry
@@ -298,6 +300,38 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     function collectMYTH(uint256 _periodNum) external whenNotPaused {
         MeritManager(meritManagerAddr).claimMytho(_periodNum);
         emit MythoCollected(msg.sender, _periodNum);
+    }
+
+    /**
+     * @notice Allows the multisig wallet to withdraw any ERC20 token from the contract balance
+     *         This function is intended for distributing tokens from the Totem's treasury 
+     *         while the governance system is not yet implemented. Once governance is in place,
+     *         this functionality should be moved to a governance-controlled mechanism.
+     * @param _token The address of the ERC20 token to withdraw
+     * @param _to The address to send the tokens to
+     * @param _amount The amount of tokens to withdraw
+     */
+    function withdrawToken(
+        address _token,
+        address _to,
+        uint256 _amount
+    ) external nonReentrant {
+        // Check if caller is the multisig wallet
+        address multisigWallet = AddressRegistry(registryAddr).getMultisigWallet();
+        if (msg.sender != multisigWallet) revert NotMultisigWallet();
+        
+        if (_token == address(0)) revert InvalidParams();
+        if (_to == address(0)) revert InvalidParams();
+        if (_amount == 0) revert ZeroAmount();
+
+        IERC20 token = IERC20(_token);
+        uint256 contractBalance = token.balanceOf(address(this));
+        
+        if (contractBalance < _amount) revert InsufficientTotemBalance();
+
+        token.safeTransfer(_to, _amount);
+        
+        emit TokenWithdrawn(_token, _to, _amount);
     }
 
     /**

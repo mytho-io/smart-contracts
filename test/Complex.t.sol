@@ -2245,4 +2245,222 @@ contract ComplexTest is Test {
     function warp(uint256 _time) internal {
         vm.warp(block.timestamp + _time);
     }
+
+    // Test withdrawToken function functionality
+    function test_WithdrawToken_Success() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Create a test token and send some to the totem
+        MockToken testToken = new MockToken();
+        testToken.mint(address(totem), 1000 ether);
+
+        // Check initial balances
+        assertEq(testToken.balanceOf(address(totem)), 1000 ether);
+        assertEq(testToken.balanceOf(userB), 0);
+
+        // Withdraw tokens using multisig wallet
+        prank(multisigWallet);
+        totem.withdrawToken(address(testToken), userB, 500 ether);
+
+        // Check final balances
+        assertEq(testToken.balanceOf(address(totem)), 500 ether);
+        assertEq(testToken.balanceOf(userB), 500 ether);
+    }
+
+    function test_WithdrawToken_NotMultisigWallet() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Create a test token and send some to the totem
+        MockToken testToken = new MockToken();
+        testToken.mint(address(totem), 1000 ether);
+
+        // Try to withdraw with unauthorized user
+        prank(userA);
+        vm.expectRevert(abi.encodeWithSelector(Totem.NotMultisigWallet.selector));
+        totem.withdrawToken(address(testToken), userB, 500 ether);
+
+        // Try to withdraw with another unauthorized user
+        prank(userB);
+        vm.expectRevert(abi.encodeWithSelector(Totem.NotMultisigWallet.selector));
+        totem.withdrawToken(address(testToken), userB, 500 ether);
+    }
+
+    function test_WithdrawToken_InvalidParams() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Create a test token
+        MockToken testToken = new MockToken();
+        testToken.mint(address(totem), 1000 ether);
+
+        prank(multisigWallet);
+
+        // Test zero token address
+        vm.expectRevert(abi.encodeWithSelector(Totem.InvalidParams.selector));
+        totem.withdrawToken(address(0), userB, 500 ether);
+
+        // Test zero recipient address
+        vm.expectRevert(abi.encodeWithSelector(Totem.InvalidParams.selector));
+        totem.withdrawToken(address(testToken), address(0), 500 ether);
+
+        // Test zero amount
+        vm.expectRevert(abi.encodeWithSelector(Totem.ZeroAmount.selector));
+        totem.withdrawToken(address(testToken), userB, 0);
+    }
+
+    function test_WithdrawToken_InsufficientBalance() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Create a test token with limited balance
+        MockToken testToken = new MockToken();
+        testToken.mint(address(totem), 100 ether);
+
+        // Try to withdraw more than available
+        prank(multisigWallet);
+        vm.expectRevert(abi.encodeWithSelector(Totem.InsufficientTotemBalance.selector));
+        totem.withdrawToken(address(testToken), userB, 500 ether);
+    }
+
+    function test_WithdrawToken_EventEmission() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Create a test token and send some to the totem
+        MockToken testToken = new MockToken();
+        testToken.mint(address(totem), 1000 ether);
+
+        // Expect the TokenWithdrawn event
+        vm.expectEmit(true, true, false, true);
+        emit Totem.TokenWithdrawn(address(testToken), userB, 500 ether);
+
+        // Withdraw tokens
+        prank(multisigWallet);
+        totem.withdrawToken(address(testToken), userB, 500 ether);
+    }
+
+    function test_WithdrawToken_WithMYTHOToken() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Grant REGISTRATOR role to deployer and register totem 
+        prank(deployer);
+        mm.grantRole(mm.REGISTRATOR(), deployer);
+        mm.register(address(totem));
+
+        // Credit merit to the totem which will mint MYTHO tokens
+        prank(deployer);
+        mm.creditMerit(address(totem), 1000 ether);
+        
+        // Move to next period and claim tokens to get MYTHO in the totem
+        warp(mm.periodDuration() + 1);
+        prank(address(totem));
+        uint256 currentPeriod = mm.currentPeriod();
+        mm.claimMytho(currentPeriod - 1);
+
+        uint256 totemBalance = mytho.balanceOf(address(totem));
+        assertTrue(totemBalance > 0, "Totem should have MYTHO tokens");
+
+        // Check initial balances
+        assertEq(mytho.balanceOf(userB), 0);
+
+        // Withdraw MYTHO tokens using multisig wallet
+        prank(multisigWallet);
+        totem.withdrawToken(address(mytho), userB, totemBalance / 2);
+
+        // Check final balances
+        assertEq(mytho.balanceOf(address(totem)), totemBalance / 2);
+        assertEq(mytho.balanceOf(userB), totemBalance / 2);
+    }
+
+    function test_WithdrawToken_MultipleWithdrawals() public {
+        // Create a totem first
+        _createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+        Totem totem = Totem(data.totemAddr);
+
+        // Create a mock multisig wallet address
+        address multisigWallet = makeAddr("multisigWallet");
+        
+        // Set the multisig wallet in the registry
+        prank(deployer);
+        registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
+
+        // Create a test token and send some to the totem
+        MockToken testToken = new MockToken();
+        testToken.mint(address(totem), 1000 ether);
+
+        prank(multisigWallet);
+
+        // First withdrawal
+        totem.withdrawToken(address(testToken), userA, 300 ether);
+        assertEq(testToken.balanceOf(address(totem)), 700 ether);
+        assertEq(testToken.balanceOf(userA), 300 ether);
+
+        // Second withdrawal
+        totem.withdrawToken(address(testToken), userB, 200 ether);
+        assertEq(testToken.balanceOf(address(totem)), 500 ether);
+        assertEq(testToken.balanceOf(userB), 200 ether);
+
+        // Third withdrawal (remaining balance)
+        totem.withdrawToken(address(testToken), userC, 500 ether);
+        assertEq(testToken.balanceOf(address(totem)), 0);
+        assertEq(testToken.balanceOf(userC), 500 ether);
+    }
 }
