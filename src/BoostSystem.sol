@@ -16,14 +16,7 @@ import {VRFV2PlusClient} from "@ccip/vrf/dev/libraries/VRFV2PlusClient.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 import {TotemFactory} from "./TotemFactory.sol";
 import {MeritManager} from "./MeritManager.sol";
-
-// Interface for NFT Badge contract
-interface IBadgeNFT {
-    function mintBadge(
-        address to,
-        uint256 milestone
-    ) external returns (uint256 tokenId);
-}
+import {BadgeNFT} from "./BadgeNFT.sol";
 
 /**
  * @title BoostSystem
@@ -61,7 +54,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     uint256 private signatureValidityWindow; // Time window for signature validity (default: 5 minutes)
 
     // NFT Badge system
-    IBadgeNFT private badgeNFT; // Badge NFT contract
+    BadgeNFT private badgeNFT; // Badge NFT contract
     uint256[] private milestones; // Available milestones: [7, 14, 30, 100, 200]
 
     // Mappings
@@ -115,6 +108,14 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     event MilestoneAchieved(address indexed user, address indexed totemAddr, uint256 milestone, uint256 streakDays); // prettier-ignore
     event BadgeMinted(address indexed user, address indexed totemAddr, uint256 milestone, uint256 tokenId); // prettier-ignore
 
+    /**
+     * @notice Initialize the BoostSystem contract
+     * @param _registryAddr Address of the AddressRegistry contract
+     * @param _vrfCoordinator Address of the VRF Coordinator contract
+     * @param _vrfSubscriptionId VRF subscription ID
+     * @param _vrfKeyHash VRF key hash for randomness requests
+     * @dev This function replaces the constructor for upgradeable contracts
+     */
     function initialize(
         address _registryAddr,
         address _vrfCoordinator,
@@ -166,6 +167,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
     // MODIFIERS
 
+    /**
+     * @notice Modifier to check if totem is valid and user has enough tokens
+     * @param _totemAddr Address of the totem to validate
+     * @dev Reverts if totem doesn't exist or user doesn't have required tokens
+     */
     modifier checkValidity(address _totemAddr) {
         _checkValidity(_totemAddr);
         _;
@@ -173,6 +179,13 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
     // EXTERNAL FUNCTIONS
 
+    /**
+     * @notice Perform a free daily boost on a totem
+     * @param _totemAddr Address of the totem to boost
+     * @param _timestamp Timestamp used for signature verification
+     * @param _signature Frontend signature for verification
+     * @dev Requires valid signature from frontend signer and respects boost interval
+     */
     function boost(
         address _totemAddr,
         uint256 _timestamp,
@@ -199,6 +212,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         emit TotemBoosted(msg.sender, _totemAddr);
     }
 
+    /**
+     * @notice Perform a premium boost on a totem with ETH payment
+     * @param _totemAddr Address of the totem to boost
+     * @dev Uses ChainLink VRF for random reward calculation, grants grace days, and applies streak multiplier
+     */
     function premiumBoost(
         address _totemAddr
     ) external payable checkValidity(_totemAddr) whenNotPaused {
@@ -296,6 +314,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
     // ADMIN FUNCTIONS
 
+    /**
+     * @notice Sets the minimum totem tokens amount required for boost
+     * @param _minTotemTokensAmountForBoost New minimum token amount
+     * @dev Only applies to ERC20 tokens, ERC721 tokens require balance > 0
+     */
     function setMinTotemTokensAmountForBoost(
         uint256 _minTotemTokensAmountForBoost
     ) external onlyRole(MANAGER) {
@@ -306,6 +329,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         );
     }
 
+    /**
+     * @notice Sets the boost interval (time between free boosts)
+     * @param _boostInterval New boost interval in seconds (default: 1 day)
+     * @dev This affects how often users can perform free boosts
+     */
     function setBoostInterval(
         uint256 _boostInterval
     ) external onlyRole(MANAGER) {
@@ -402,12 +430,17 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
      * @param _badgeNFT Address of the badge NFT contract
      */
     function setBadgeNFT(address _badgeNFT) external onlyRole(MANAGER) {
-        badgeNFT = IBadgeNFT(_badgeNFT);
+        badgeNFT = BadgeNFT(_badgeNFT);
         emit ParameterUpdated("badgeNFT", uint256(uint160(_badgeNFT)));
     }
 
     // INTERNAL FUNCTIONS
 
+    /**
+     * @notice Updates streak start point and handles grace day logic
+     * @param _totemAddr Address of the totem
+     * @dev Manages streak continuation, grace day consumption, and streak reset logic
+     */
     function _updateStreakStartPoint(address _totemAddr) internal {
         BoostData storage boostData = boosts[msg.sender][_totemAddr];
 
@@ -447,6 +480,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         boostData.streakStartPoint = block.timestamp;
     } // prettier-ignore
 
+    /**
+     * @notice Calculate streak points for current user
+     * @param _totemAddr Address of the totem
+     * @param _basePoints Base points before streak multiplier
+     * @return Calculated points with streak multiplier applied
+     */
     function _getStreakPoints(
         address _totemAddr,
         uint256 _basePoints
@@ -454,6 +493,13 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         return _getStreakPointsForUser(msg.sender, _totemAddr, _basePoints);
     }
 
+    /**
+     * @notice Calculate streak points for specific user
+     * @param _user User address
+     * @param _totemAddr Address of the totem
+     * @param _basePoints Base points before streak multiplier
+     * @return Calculated points with streak multiplier applied (max 30 days streak)
+     */
     function _getStreakPointsForUser(
         address _user,
         address _totemAddr,
@@ -466,6 +512,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         return (_basePoints * (100 + (streak - 1) * 5)) / 100;
     }
 
+    /**
+     * @notice Validates totem existence and user token balance
+     * @param _totemAddr Address of the totem to validate
+     * @dev Checks if totem exists and user has sufficient tokens (ERC20/ERC721)
+     */
     function _checkValidity(address _totemAddr) internal view {
         TotemFactory.TotemData memory data = factory.getTotemDataByAddress(
             _totemAddr
@@ -488,6 +539,13 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         }
     }
 
+    /**
+     * @notice Verifies frontend signature for boost function
+     * @param _totemAddr Address of the totem
+     * @param _timestamp Timestamp used in signature
+     * @param _signature Signature to verify
+     * @dev Prevents replay attacks and validates signature from frontend signer
+     */
     function _verifySignature(
         address _totemAddr,
         uint256 _timestamp,
@@ -585,6 +643,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
     // VIEW FUNCTIONS
 
+    /**
+     * @notice Gets the last boost timestamp for a user and totem
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @return Last boost timestamp
+     */
     function getLastBoostTimestamp(
         address _user,
         address _totemAddr
@@ -592,14 +656,28 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         return boosts[_user][_totemAddr].lastBoostTimestamp;
     }
 
+    /**
+     * @notice Gets the boost interval (time between free boosts)
+     * @return Boost interval in seconds
+     */
     function getBoostInterval() external view returns (uint256) {
         return boostInterval;
     }
 
+    /**
+     * @notice Gets the boost window for premium boost grace days
+     * @return Boost window duration in seconds
+     */
     function getBoostWindow() external view returns (uint256) {
         return boostWindow;
     }
 
+    /**
+     * @notice Gets time remaining before next free boost is available
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @return Time in seconds before next free boost (0 if available now)
+     */
     function getTimeBeforeNextFreeBoost(
         address _user,
         address _totemAddr
@@ -900,6 +978,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
     // VRF CALLBACK FUNCTION
 
+    /**
+     * @notice Callback function used by VRF Coordinator to fulfill random words request
+     * @param _requestId The ID of the VRF request
+     * @param _randomWords Array of random words returned by VRF
+     * @dev Calculates base reward, applies streak multiplier, and credits merit points
+     */
     function fulfillRandomWords(
         uint256 _requestId,
         uint256[] memory _randomWords
@@ -934,6 +1018,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         );
     }
 
+    /**
+     * @notice Raw fulfillment function called by VRF Coordinator
+     * @param _requestId The ID of the VRF request
+     * @param _randomWords Array of random words returned by VRF
+     * @dev Only callable by VRF Coordinator, delegates to internal fulfillRandomWords
+     */
     function rawFulfillRandomWords(
         uint256 _requestId,
         uint256[] memory _randomWords
@@ -947,6 +1037,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         fulfillRandomWords(_requestId, _randomWords);
     }
 
+    /**
+     * @notice Calculates base reward from VRF random number
+     * @param _randomWord Random word from VRF
+     * @return Base reward points based on probability distribution
+     * @dev 50%=500pts, 25%=700pts, 15%=1000pts, 7%=2000pts, 3%=3000pts
+     */
     function _calculateBaseReward(
         uint256 _randomWord
     ) private pure returns (uint256) {
