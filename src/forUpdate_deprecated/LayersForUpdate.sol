@@ -14,12 +14,12 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {MeritManager} from "./MeritManager.sol";
-import {Totem} from "./Totem.sol";
-import {Shards} from "./Shards.sol";
-import {AddressRegistry} from "./AddressRegistry.sol";
-import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
-import {TotemFactory} from "./TotemFactory.sol";
+import {MeritManager} from "./MeritManagerForUpdate.sol";
+import {Totem} from "./TotemForUpdate.sol";
+import {Shards} from "./ShardsForUpdate.sol";
+import {AddressRegistry} from "./AddressRegistryForUpdate.sol";
+import {TotemTokenDistributor} from "./TotemTokenDistributorForUpdate.sol";
+import {TotemFactory} from "./TotemFactoryForUpdate.sol";
 
 /**
  * @title Layers
@@ -250,12 +250,8 @@ contract Layers is
         Layer storage pendingLayer = pendingLayers[_pendingId];
         if (pendingLayer.creator == address(0)) revert LayerNotFound();
 
-        // Check if layer was already verified by checking both new and old mapping for backward compatibility
-        bool isValidNewMapping = userPendingLayerByTotem[pendingLayer.creator][pendingLayer.totemAddr] == _pendingId;
-        bool isValidOldMapping = userPendingLayer[pendingLayer.creator] == _pendingId;
-
-        if (!isValidNewMapping && !isValidOldMapping) revert LayerAlreadyVerified();
-        
+        // Check if layer was already verified by checking userPendingLayerByTotem mapping
+        if (userPendingLayerByTotem[pendingLayer.creator][pendingLayer.totemAddr] != _pendingId) revert LayerAlreadyVerified();
         Totem totem = Totem(pendingLayer.totemAddr);
 
         // Check if caller is authorized
@@ -290,11 +286,8 @@ contract Layers is
             emit LayerRejected(_pendingId);
         }
 
-        // Clean up pending layer (both old and new mappings for backward compatibility)
+        // Clean up pending layer
         delete userPendingLayerByTotem[creator][pendingLayer.totemAddr];
-        if (userPendingLayer[creator] == _pendingId) {
-            delete userPendingLayer[creator];
-        }
 
         return newLayerId;
     }

@@ -25,7 +25,6 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
     bytes32 private constant SHARDS = "SHARDS";
     bytes32 private constant LAYERS = "LAYERS";
-    bytes32 private constant BOOST_SYSTEM = "BOOST_SYSTEM";
 
     // Events
     event AddressSet(bytes32 indexed id, address oldAddress, address newAddress); // prettier-ignore
@@ -148,14 +147,6 @@ contract AddressRegistry is AccessControlUpgradeable {
      */
     function getTokenHoldersOracle() external view returns (address) {
         return getAddress(TOKEN_HOLDERS_ORACLE);
-    }
-
-    /**
-     * @notice Gets the address of the BoostSystem contract
-     * @return Address of the BoostSystem contract
-     */
-    function getBoostSystem() external view returns (address) {
-        return getAddress(BOOST_SYSTEM);
     }
 
     /**

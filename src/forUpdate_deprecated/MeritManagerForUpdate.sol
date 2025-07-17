@@ -10,9 +10,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
-import {AddressRegistry} from "./AddressRegistry.sol";
-import {Totem} from "./Totem.sol";
-import {Layers} from "./Layers.sol";
+import {AddressRegistry} from "./AddressRegistryForUpdate.sol";
+import {Totem} from "./TotemForUpdate.sol";
 
 /**
  * @title MeritManager
@@ -73,7 +72,6 @@ contract MeritManager is
     event ParameterUpdated(string parameterName, uint256 newValue);
     event LayerRewardUpdated(uint256 amount); // prettier-ignore
     event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
-    event DonationTooSmallForMerit(address indexed totem, uint256 donationAmount, uint256 minimumRequired);
 
     // Custom errors
     error TotemNotRegistered();
@@ -96,6 +94,7 @@ contract MeritManager is
     error NotAuthorized();
     error InsufficientKarma();
     error InvalidDivisor();
+    error InvalidAmount();
 
     /**
      * @notice Initializes the contract with required parameters
@@ -236,30 +235,6 @@ contract MeritManager is
     }
 
     /**
-     * @notice Awards merit points to a Totem for boosting
-     * @dev Only callable by the BoostSystem contract
-     * @param _totemAddr Address of the Totem to credit merit to
-     */
-    function boostReward(address _totemAddr, uint256 _amountToAdd) external {
-        if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
-            revert NotAuthorized();
-
-        _creditMerit(_totemAddr, _amountToAdd);
-    }
-
-    /**
-     * @notice Awards merit points to a Totem for premium boosting
-     * @dev Only callable by the BoostSystem contract
-     * @param _totemAddr Address of the Totem to credit merit to
-     */
-    function premiumBoostReward(address _totemAddr, uint256 _amountToAdd) external {
-        if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
-            revert NotAuthorized();
-            
-        _creditMerit(_totemAddr, _amountToAdd);
-    }
-
-    /**
      * @notice Awards merit points to a Totem for creating a layer
      * @dev Only callable by the Layers contract
      * @param _totemAddr Address of the Totem to credit merit to
@@ -283,11 +258,7 @@ contract MeritManager is
 
         // Convert donation amount to merit points by dividing by the divisor
         uint256 meritPoints = _donationAmount / donationMeritDivisor;
-        
-        if (meritPoints == 0) {
-            emit DonationTooSmallForMerit(_totemAddr, _donationAmount, donationMeritDivisor);
-            return;
-        }
+        if (meritPoints == 0) revert InvalidAmount();
 
         _creditMerit(_totemAddr, meritPoints);
     }
@@ -500,6 +471,9 @@ contract MeritManager is
 
         // Only process completed periods, not the current period
         if (_currentPeriod > lastProcessedPeriod) {
+            // Calculate total periods in a year, accounting for fractional results
+            uint256 totalPeriodsInYear = (360 days) / periodDuration;
+            
             // Process all completed periods up to but not including the current period
             for (
                 uint256 period = lastProcessedPeriod;
@@ -555,48 +529,6 @@ contract MeritManager is
     }
 
     /**
-     * @notice Calculates how much merit points a donation would generate
-     * @param _donationAmount Amount of the donation in wei (before fees)
-     * @return meritPoints The amount of merit points that would be awarded
-     */
-    function calculateDonationMerit(
-        uint256 _donationAmount
-    ) external view returns (uint256) {
-        // Get donation fee from Layers contract
-        address layersAddr = AddressRegistry(registryAddr).getLayers();
-        uint256 donationFeePercentage = Layers(layersAddr).donationFeePercentage();
-        
-        // Calculate fee and amount after fee (same logic as in Layers.donateToLayer)
-        uint256 fee = (_donationAmount * donationFeePercentage) / 10000;
-        uint256 creatorAmount = _donationAmount - fee;
-        
-        // Calculate merit points based on amount after fee
-        if (isMythum()) {
-            return creatorAmount * mythumMultiplier / 100 / donationMeritDivisor;
-        }
-        return creatorAmount / donationMeritDivisor;
-    }
-
-    /**
-     * @notice Gets the minimum donation amount required to receive merit points
-     * @return Minimum donation amount in wei (before fees)
-     */
-    function getMinimumDonationForMerit() external view returns (uint256) {
-        // Get donation fee from Layers contract
-        address layersAddr = AddressRegistry(registryAddr).getLayers();
-        uint256 donationFeePercentage = Layers(layersAddr).donationFeePercentage();
-        
-        // Calculate minimum donation amount that after fee deduction will give at least 1 merit point
-        // creatorAmount = donationAmount - fee
-        // creatorAmount = donationAmount - (donationAmount * feePercentage / 10000)
-        // creatorAmount = donationAmount * (10000 - feePercentage) / 10000
-        // For 1 merit point: donationMeritDivisor = donationAmount * (10000 - feePercentage) / 10000
-        // donationAmount = donationMeritDivisor * 10000 / (10000 - feePercentage)
-        
-        return (donationMeritDivisor * 10000) / (10000 - donationFeePercentage);
-    }
-
-    /**
      * @notice Checks if the current time is within the Mythum period
      * @return Whether current time is in Mythum period
      */
@@ -616,7 +548,7 @@ contract MeritManager is
      * @return Year index (0-3)
      */
     function getYearIndex() public view returns (uint256) {
-        uint256 slices = (360 days) / periodDuration; // 22.5 periods per year
+        uint256 slices = (352 days) / periodDuration; // 22 periods exactly
         return (currentPeriod() / slices) > 3 ? 3 : (currentPeriod() / slices);
     }
 

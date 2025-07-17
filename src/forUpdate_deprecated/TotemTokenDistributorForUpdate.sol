@@ -7,11 +7,11 @@ import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/Pau
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {TotemFactory} from "./TotemFactory.sol";
-import {TotemToken} from "./TotemToken.sol";
-import {Totem} from "./Totem.sol";
-import {MeritManager} from "./MeritManager.sol";
-import {AddressRegistry} from "./AddressRegistry.sol";
+import {TotemFactory} from "./TotemFactoryForUpdate.sol";
+import {TotemToken} from "./TotemTokenForUpdate.sol";
+import {Totem} from "./TotemForUpdate.sol";
+import {MeritManager} from "./MeritManagerForUpdate.sol";
+import {AddressRegistry} from "./AddressRegistryForUpdate.sol";
 
 import {IUniswapV2Router02} from "./interfaces/IUniswapV2Router02.sol";
 import {IUniswapV2Factory} from "./interfaces/IUniswapV2Factory.sol";

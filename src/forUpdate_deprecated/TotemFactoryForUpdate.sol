@@ -9,11 +9,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
-import {TotemToken} from "./TotemToken.sol";
-import {MeritManager} from "./MeritManager.sol";
-import {AddressRegistry} from "./AddressRegistry.sol";
-import {TokenHoldersOracle} from "./utils/TokenHoldersOracle.sol";
+import {TotemTokenDistributor} from "./TotemTokenDistributorForUpdate.sol";
+import {TotemToken} from "./TotemTokenForUpdate.sol";
+import {MeritManager} from "./MeritManagerForUpdate.sol";
+import {AddressRegistry} from "./AddressRegistryForUpdate.sol";
+import {TokenHoldersOracle} from "./utils/TokenHoldersOracleForUpdate.sol";
 
 /**
  * @title TotemFactory
