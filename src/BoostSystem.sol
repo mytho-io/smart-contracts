@@ -30,7 +30,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
     // VRF Configuration
     IVRFCoordinatorV2Plus private vrfCoordinator;
-    uint64 private vrfSubscriptionId;
+    uint256 private vrfSubscriptionId;
     bytes32 private vrfKeyHash;
     uint32 private vrfCallbackGasLimit;
     uint16 private vrfRequestConfirmations;
@@ -119,7 +119,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     function initialize(
         address _registryAddr,
         address _vrfCoordinator,
-        uint64 _vrfSubscriptionId,
+        uint256 _vrfSubscriptionId,
         bytes32 _vrfKeyHash
     ) public initializer {
         __AccessControl_init();
@@ -392,7 +392,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
      */
     function updateVRFConfig(
         address _vrfCoordinator,
-        uint64 _vrfSubscriptionId,
+        uint256 _vrfSubscriptionId,
         bytes32 _vrfKeyHash,
         uint32 _vrfCallbackGasLimit
     ) external onlyRole(MANAGER) {
