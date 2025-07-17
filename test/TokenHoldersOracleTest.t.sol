@@ -44,7 +44,7 @@ contract TokenHoldersOracleTest is Test {
     uint256 constant DEFAULT_MAX_DATA_AGE = 5 minutes;
 
     // Events to test
-    event HoldersCountUpdated(address indexed token, uint256 count, uint256 timestamp);
+    event NFTCountUpdated(address indexed token, uint256 count, uint256 timestamp);
     event UpdateFeeChanged(uint256 oldFee, uint256 newFee);
     event UpdateFeeCollected(address indexed user, address indexed token, uint256 fee);
     event TreasuryAddressUpdated(address oldTreasury, address newTreasury);
@@ -96,13 +96,13 @@ contract TokenHoldersOracleTest is Test {
         // User with CALLER_ROLE should be able to request holders count
         vm.startPrank(user1);
         vm.expectRevert(); // This will revert because the mock router doesn't implement the required function
-        holdersOracle.requestHoldersCount(tokenAddress);
+        holdersOracle.requestNFTCount(tokenAddress);
         vm.stopPrank();
         
         // User without CALLER_ROLE should not be able to request holders count
         vm.startPrank(user2);
         vm.expectRevert();
-        holdersOracle.requestHoldersCount(tokenAddress);
+        holdersOracle.requestNFTCount(tokenAddress);
         vm.stopPrank();
     }
     
@@ -127,14 +127,14 @@ contract TokenHoldersOracleTest is Test {
         emit TreasuryAddressUpdated(treasury, newTreasury);
         holdersOracle.setTreasuryAddress(newTreasury);
         
-        // Test manuallyUpdateHoldersCount
+        // Test manuallyUpdateNFTCount
         uint256 count = 100;
         vm.expectEmit(true, true, true, true);
-        emit HoldersCountUpdated(tokenAddress, count, block.timestamp);
-        holdersOracle.manuallyUpdateHoldersCount(tokenAddress, count);
+        emit NFTCountUpdated(tokenAddress, count, block.timestamp);
+        holdersOracle.manuallyUpdateNFTCount(tokenAddress, count);
         
         // Verify the update
-        (uint256 storedCount, uint256 lastUpdate) = holdersOracle.getHoldersCount(tokenAddress);
+        (uint256 storedCount, uint256 lastUpdate) = holdersOracle.getNFTCount(tokenAddress);
         assertEq(storedCount, count);
         assertEq(lastUpdate, block.timestamp);
         vm.stopPrank();
@@ -150,7 +150,7 @@ contract TokenHoldersOracleTest is Test {
     function test_IsDataFresh() public {
         // Setup: manually update holders count
         vm.startPrank(owner);
-        holdersOracle.manuallyUpdateHoldersCount(tokenAddress, 100);
+        holdersOracle.manuallyUpdateNFTCount(tokenAddress, 100);
         vm.stopPrank();
         
         // Data should be fresh immediately after update
@@ -161,8 +161,8 @@ contract TokenHoldersOracleTest is Test {
         assertFalse(holdersOracle.isDataFresh(tokenAddress));
     }
     
-    // Test updateNFTHoldersCount function
-    function test_UpdateNFTHoldersCount() public {
+    // Test updateNFTCount function
+    function test_updateNFTCount() public {
         // Setup: mint an NFT to user2
         vm.startPrank(owner);
         mockNFT.mint(user2, 1);
@@ -171,13 +171,13 @@ contract TokenHoldersOracleTest is Test {
         // User without NFT should not be able to update
         vm.startPrank(user1);
         vm.expectRevert(TokenHoldersOracle.InsufficientNFTBalance.selector);
-        holdersOracle.updateNFTHoldersCount{value: DEFAULT_UPDATE_FEE}(address(mockNFT));
+        holdersOracle.updateNFTCount{value: DEFAULT_UPDATE_FEE}(address(mockNFT));
         vm.stopPrank();
         
         // User with NFT but insufficient fee should not be able to update
         vm.startPrank(user2);
         vm.expectRevert(TokenHoldersOracle.InsufficientFee.selector);
-        holdersOracle.updateNFTHoldersCount{value: DEFAULT_UPDATE_FEE - 1}(address(mockNFT));
+        holdersOracle.updateNFTCount{value: DEFAULT_UPDATE_FEE - 1}(address(mockNFT));
         vm.stopPrank();
         
         // User with NFT and correct fee should be able to update
@@ -188,7 +188,7 @@ contract TokenHoldersOracleTest is Test {
         
         // Expect this to revert due to mock router limitations
         vm.expectRevert();
-        holdersOracle.updateNFTHoldersCount{value: DEFAULT_UPDATE_FEE}(address(mockNFT));
+        holdersOracle.updateNFTCount{value: DEFAULT_UPDATE_FEE}(address(mockNFT));
         vm.stopPrank();
     }
     
@@ -232,11 +232,11 @@ contract TokenHoldersOracleTest is Test {
         }
     }
     
-    // Test for invalid token address in manuallyUpdateHoldersCount
+    // Test for invalid token address in manuallyUpdateNFTCount
     function test_InvalidTokenAddress() public {
         vm.startPrank(owner);
         vm.expectRevert(TokenHoldersOracle.InvalidTokenAddress.selector);
-        holdersOracle.manuallyUpdateHoldersCount(address(0), 100);
+        holdersOracle.manuallyUpdateNFTCount(address(0), 100);
         vm.stopPrank();
     }
     
@@ -248,10 +248,10 @@ contract TokenHoldersOracleTest is Test {
         vm.stopPrank();
     }
     
-    // Test getHoldersCount for non-existent token
-    function test_GetHoldersCountNonExistent() public {
+    // Test getNFTCount for non-existent token
+    function test_getNFTCountNonExistent() public {
         address nonExistentToken = makeAddr("nonExistentToken");
-        (uint256 count, uint256 lastUpdate) = holdersOracle.getHoldersCount(nonExistentToken);
+        (uint256 count, uint256 lastUpdate) = holdersOracle.getNFTCount(nonExistentToken);
         assertEq(count, 0);
         assertEq(lastUpdate, 0);
     }
@@ -260,7 +260,7 @@ contract TokenHoldersOracleTest is Test {
     function test_DataAlreadyFresh() public {
         // Setup: manually update holders count and mint NFT to user2
         vm.startPrank(owner);
-        holdersOracle.manuallyUpdateHoldersCount(address(mockNFT), 100);
+        holdersOracle.manuallyUpdateNFTCount(address(mockNFT), 100);
         mockNFT.mint(user2, 1);
         vm.stopPrank();
         
@@ -268,12 +268,12 @@ contract TokenHoldersOracleTest is Test {
         vm.startPrank(user2);
         vm.deal(user2, 1 ether);
         vm.expectRevert(TokenHoldersOracle.DataAlreadyFresh.selector);
-        holdersOracle.updateNFTHoldersCount{value: DEFAULT_UPDATE_FEE}(address(mockNFT));
+        holdersOracle.updateNFTCount{value: DEFAULT_UPDATE_FEE}(address(mockNFT));
         vm.stopPrank();
     }
     
     // Test the deployed contract instance (commented out as it requires a real deployment)
-    function testDeployed_getHoldersCount() public {
+    function testDeployed_getNFTCount() public {
         // This test is for the deployed contract and is commented out
         // Uncomment and modify as needed when testing against a real deployment
         
@@ -283,8 +283,8 @@ contract TokenHoldersOracleTest is Test {
         
         // vm.startPrank(owner);
         // address tokenAddress = 0x2877Da93f3b2824eEF206b3B313d4A61E01e5698;
-        // deployedOracle.requestHoldersCount(tokenAddress);
-        // (uint256 count, uint256 lastUpdate) = deployedOracle.getHoldersCount(tokenAddress);
+        // deployedOracle.requestNFTCount(tokenAddress);
+        // (uint256 count, uint256 lastUpdate) = deployedOracle.getNFTCount(tokenAddress);
         // console.log("Holders count:", count);
         // console.log("Last update:", lastUpdate);
         // vm.stopPrank();

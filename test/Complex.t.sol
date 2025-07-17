@@ -105,9 +105,9 @@ contract ComplexTest is Test {
         vm.recordLogs();
         _createTotem(userA);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        (, , uint256 id) = abi.decode(
+        ( , , , , uint256 id) = abi.decode(
             logs[logs.length - 1].data,
-            (address, address, uint256)
+            (bytes, address, address, address, uint256)
         );
         assertEq(id, 0);
         assertEq(factory.getLastId(), 1);
@@ -180,7 +180,7 @@ contract ComplexTest is Test {
         prank(userA);
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(customToken)),
+            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(customToken)),
             abi.encode()
         );
         factory.createTotemWithExistingToken(
@@ -242,7 +242,7 @@ contract ComplexTest is Test {
         // Create totem with NFT token
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(nftToken)),
+            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(nftToken)),
             abi.encode(0)
         );
 
@@ -270,7 +270,7 @@ contract ComplexTest is Test {
         
         // Manually update holders count in oracle (simulating Chainlink Functions response)
         prank(deployer);
-        holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3); // 3 NFT holders
+        holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3); // 3 NFT holders
         
         // Test getCirculatingSupply for NFT
         prank(userA);
@@ -293,13 +293,14 @@ contract ComplexTest is Test {
         prank(deployer);
         mm.creditMerit(address(totem), 1000);
 
-        vm.warp(60 days);
+        vm.warp(17 days); // Move to next period
+        mm.updateState();
 
-        holdersOracle.manuallyUpdateHoldersCount(address(nftToken), 3);        
+        holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3);        
         
         // Now redeem tokens as userA (who holds NFT)
         prank(userA);
-        totem.collectMYTH(mm.currentPeriod() - 1);
+        totem.collectMYTH(0); // Claim for period 0
         nftToken.approve(address(totem), 1);
         totem.redeemTotemTokens(1); // For NFTs, amount is ignored
 
@@ -522,8 +523,8 @@ contract ComplexTest is Test {
         prank(deployer);
         mm.revokeRole(mm.BLACKLISTED(), data.totemAddr);
 
-        // Warp to Mythus period (last 25% of period)
-        warp(23 days);
+        // Warp to Mythus period (last 3 days of 16-day period)
+        warp(13 days);
 
         prank(userA);
         mm.boostTotem{value: 0.001 ether}(data.totemAddr);
@@ -540,7 +541,7 @@ contract ComplexTest is Test {
         assertEq(mm.getUserBoostedTotem(userA, period + 1), address(0));
 
         // boost totem in the next mythum period
-        warp(30 days);
+        warp(16 days);
 
         mm.boostTotem{value: 0.002 ether}(data.totemAddr);
         assertEq(address(treasury).balance, 0.002 ether);
@@ -692,9 +693,9 @@ contract ComplexTest is Test {
         prank(deployer);
         mm.creditMerit(data.totemAddr, 800);
         
-        // Warp to Mythum period (23/30 of the period duration)
+        // Warp to Mythum period (last 3 days of period)
         uint256 periodDuration = mm.periodDuration();
-        uint256 mythumStart = (periodDuration * 23) / 30;
+        uint256 mythumStart = periodDuration - 3 days;
         warp(mythumStart + 1);
         
         // Boost in Mythum period
@@ -847,7 +848,7 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(customToken)),
+            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(customToken)),
             abi.encode()
         );
         factory.createTotemWithExistingToken(
@@ -1010,7 +1011,7 @@ contract ComplexTest is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestHoldersCount.selector, address(customToken)),
+            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(customToken)),
             abi.encode()
         );
         vm.expectRevert(
@@ -1147,8 +1148,8 @@ contract ComplexTest is Test {
         // End sale period to allow transfers
         _buyAllTotemTokens(totemTokenAddr);
 
-        // Warp to Mythus period (last 25% of period)
-        warp(23 days);
+        // Warp to Mythus period (last 3 days of 16-day period)
+        warp(13 days);
 
         // User B has no totem tokens, should fail with InsufficientTotemBalance
         vm.deal(userB, 1 ether); // Provide ETH for boost fee
@@ -1171,7 +1172,7 @@ contract ComplexTest is Test {
         assertEq(mm.getUserBoostedTotem(userB, period + 1), address(0));
 
         // boost totem in the next mythum period
-        warp(30 days);
+        warp(16 days);
 
         mm.boostTotem{value: 0.002 ether}(data.totemAddr);
         assertEq(address(treasury).balance, 0.002 ether);
@@ -1334,14 +1335,14 @@ contract ComplexTest is Test {
 
     // Test period duration change preserves period count
     function test_PeriodDurationChange_PreservesPeriodCount() public {
-        // Initial period duration is 30 days
-        assertEq(mm.periodDuration(), 30 days);
+        // Initial period duration is 16 days
+        assertEq(mm.periodDuration(), 16 days);
 
         // Initial period is 0
         assertEq(mm.currentPeriod(), 0);
 
-        // Warp forward 45 days (1.5 periods)
-        warp(45 days);
+        // Warp forward 24 days (1.5 periods)
+        warp(24 days);
 
         // Should be in period 1
         assertEq(mm.currentPeriod(), 1);
@@ -1369,11 +1370,11 @@ contract ComplexTest is Test {
 
     // Test period duration change with multiple changes
     function test_MultiplePeriodDurationChanges() public {
-        // Initial period duration is 30 days
-        assertEq(mm.periodDuration(), 30 days);
+        // Initial period duration is 16 days
+        assertEq(mm.periodDuration(), 16 days);
 
-        // Warp forward 60 days (2 periods)
-        warp(60 days);
+        // Warp forward 32 days (2 periods)
+        warp(32 days);
 
         // Should be in period 2
         assertEq(mm.currentPeriod(), 2);
@@ -1409,11 +1410,11 @@ contract ComplexTest is Test {
 
     // Test period time bounds calculation after period duration change
     function test_PeriodTimeBoundsAfterDurationChange() public {
-        // Initial period duration is 30 days
-        assertEq(mm.periodDuration(), 30 days);
+        // Initial period duration is 16 days
+        assertEq(mm.periodDuration(), 16 days);
 
-        // Warp forward 30 days (1 period)
-        warp(30 days);
+        // Warp forward 16 days (1 period)
+        warp(16 days);
 
         // Should be in period 1
         assertEq(mm.currentPeriod(), 1);
@@ -1435,28 +1436,28 @@ contract ComplexTest is Test {
 
     // Test Mythum period calculation after period duration change
     function test_MythumPeriodAfterDurationChange() public {
-        // Initial period duration is 30 days
-        assertEq(mm.periodDuration(), 30 days);
+        // Initial period duration is 16 days
+        assertEq(mm.periodDuration(), 16 days);
 
-        // Warp forward 30 days (1 period)
-        warp(30 days);
+        // Warp forward 16 days (1 period)
+        warp(16 days);
 
         // Change period duration to 20 days
         prank(deployer);
         mm.setPeriodDuration(20 days);
 
-        // Calculate the start of the Mythum period using the new formula
-        // For a 20-day period: (20 days * 23) / 30 = 15 days (rounded down)
-        uint256 mythumOffset = (20 days * 23) / 30; // = 15 days
+        // Calculate the start of the Mythum period using the real formula
+        // For a 20-day period: Mythum starts at (20 days - 3 days) = 17 days
+        uint256 mythumOffset = (20 days - 3 days); // = 17 days
         
         // Warp to just before the Mythum period in the new period
-        warp(mythumOffset - 1 days); // 30 + 14 = 44 days total
+        warp(mythumOffset - 1 days); // 16 + 16 = 32 days total
 
         // Should not be in the Mythum period yet
         assertFalse(mm.isMythum());
 
         // Warp to the Mythum period
-        warp(1 days); // 45 days total, Mythum starts at 45 days (30 + 15)
+        warp(1 days); // 33 days total, Mythum starts at 33 days (16 + 17)
 
         // Should be in the Mythum period
         assertTrue(mm.isMythum());
@@ -1465,7 +1466,7 @@ contract ComplexTest is Test {
         uint256 mythumStart = mm.getCurrentMythumStart();
         
         // Check that the difference between the expected and actual times is no more than 1 second
-        uint256 expectedStart = 30 days + mythumOffset;
+        uint256 expectedStart = 16 days + mythumOffset;
         assertTrue(
             mythumStart == expectedStart || 
             mythumStart == expectedStart + 1 || 
@@ -1486,7 +1487,7 @@ contract ComplexTest is Test {
         mm.creditMerit(data.totemAddr, 1000);
 
         // Warp to period 1
-        warp(30 days);
+        warp(16 days);
         mm.updateState();
 
         // Claim MYTHO for period 0
@@ -1581,8 +1582,8 @@ contract ComplexTest is Test {
         // End sale period to allow transfers
         _buyAllTotemTokens(totemTokenAddr);
 
-        // Warp to Mythus period (last 25% of period)
-        warp(23 days);
+        // Warp to Mythus period (last 3 days of 16-day period)
+        warp(13 days);
 
         // Test pause functionality
         prank(deployer);
@@ -2027,40 +2028,40 @@ contract ComplexTest is Test {
             address(treasury)
         );
         
-        // Test updateNFTHoldersCount with insufficient fee
+        // Test updateNFTCount with insufficient fee
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.0001 ether}(address(nftToken));
+        testOracle.updateNFTCount{value: 0.0001 ether}(address(nftToken));
         
-        // Test updateNFTHoldersCount with non-NFT token
+        // Test updateNFTCount with non-NFT token
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(paymentToken));
+        testOracle.updateNFTCount{value: 0.001 ether}(address(paymentToken));
         
-        // Test updateNFTHoldersCount with no NFT balance
+        // Test updateNFTCount with no NFT balance
         prank(userD); // userD has no NFTs
         vm.deal(userD, 1 ether);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(nftToken));
+        testOracle.updateNFTCount{value: 0.001 ether}(address(nftToken));
         
         // Manually update holders count to simulate a successful update
         prank(deployer);
-        testOracle.manuallyUpdateHoldersCount(address(nftToken), 3);
+        testOracle.manuallyUpdateNFTCount(address(nftToken), 3);
         
         // Test isDataFresh
         bool isFresh = testOracle.isDataFresh(address(nftToken));
         assertTrue(isFresh);
         
-        // Test getHoldersCount
-        (uint256 count, uint256 timestamp) = testOracle.getHoldersCount(address(nftToken));
+        // Test getNFTCount
+        (uint256 count, uint256 timestamp) = testOracle.getNFTCount(address(nftToken));
         assertEq(count, 3);
         assertEq(timestamp, block.timestamp);
         
-        // Test updateNFTHoldersCount with fresh data
+        // Test updateNFTCount with fresh data
         prank(userA);
         vm.deal(userA, 1 ether);
         vm.expectRevert();
-        testOracle.updateNFTHoldersCount{value: 0.001 ether}(address(nftToken));
+        testOracle.updateNFTCount{value: 0.001 ether}(address(nftToken));
     }
 
     // Utility function to create a totem
@@ -2087,7 +2088,7 @@ contract ComplexTest is Test {
             );
             if (user == address(distr)) continue;
             vm.deal(user, 1 ether);
-            paymentToken.mint(user, 2_500_000 ether);
+            paymentToken.mint(user, 100_000_000 ether);
 
             prank(user);
             uint256 available = distr.getAvailableTokensForPurchase(
