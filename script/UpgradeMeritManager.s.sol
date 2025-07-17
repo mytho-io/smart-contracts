@@ -12,8 +12,8 @@ import {MeritManager as MM} from "../src/MeritManager.sol";
  */
 contract UpgradeMeritManager is Script {
     // Current deployed proxy address
-    address constant MERIT_MANAGER_PROXY = 0xe2629839031bea8Dd370d109969c5033DcdEb9aA;
-    address constant MERIT_MANAGER_ADMIN = 0xC75564728232995B46853d5Cf201cFf83B195ee6;
+    address constant MERIT_MANAGER_PROXY = 0x622A3667AA0A879EEB63011c63B6395feBe38880;
+    address constant MERIT_MANAGER_ADMIN = 0xf80450Ac97aAed1608318A6Cf6cF5B558867843b;
     
     ProxyAdmin proxyAdmin;
     ITransparentUpgradeableProxy proxy;
@@ -52,4 +52,4 @@ contract UpgradeMeritManager is Script {
     }
 }
 
-// current implementation: 0xa1F241e8BD140A51b1Fc417709a67FF157463A56
+// current implementation: 0xd5885e5cC196D8bddA51894ff93Da9EfDc2b62F6

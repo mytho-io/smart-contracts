@@ -34,7 +34,7 @@ contract DoHolderOracle is Script {
         // holdersOracle.requestHoldersCount(contractAddr);
         // holdersOracle.requestHoldersCount(xnastrAddr);
 
-        (uint256 count, uint256 lastUpdate) = holdersOracle.getHoldersCount(xnastrAddr);
+        (uint256 count, uint256 lastUpdate) = holdersOracle.getNFTCount(xnastrAddr);
 
         console.log("Holders count:", count);
         console.log("Last update:", lastUpdate);

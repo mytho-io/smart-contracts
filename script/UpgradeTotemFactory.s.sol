@@ -7,13 +7,13 @@ import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.s
 import {TotemFactory} from "../src/TotemFactory.sol";
 
 /**
- * @title UpgradeMeritManager
- * @dev Script to upgrade the MeritManager contract implementation
+ * @title UpgradeTotemFactory
+ * @dev Script to upgrade the TotemFactory contract implementation
  */
 contract UpgradeTotemFactory is Script {
     // Current deployed proxy address
-    address constant TOTEM_FACTORY_PROXY = 0x6a89EdDE5D7a3C8Ec5103f7dB4Be2587660420D6;
-    address constant TOTEM_FACTORY_ADMIN = 0xBCf08Ea170a90e69f311d7144FbBeE33470b7C14;
+    address constant TOTEM_FACTORY_PROXY = 0xF0a09aC7a2242977566c8F8dF4F944ed7D333047;
+    address constant TOTEM_FACTORY_ADMIN = 0x2CF33a81ddF97dA64b6ca3931B7Cc1895a747E60;
     
     ProxyAdmin proxyAdmin;
     ITransparentUpgradeableProxy proxy;
@@ -52,4 +52,4 @@ contract UpgradeTotemFactory is Script {
     }
 }
 
-// current implementation: 0x14c134b35E9fA5e03be4c061285d68cC9F1cf3bb
+// current implementation: 

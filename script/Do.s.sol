@@ -6,7 +6,8 @@ import {Script, console, console2, StdStyle} from "forge-std/Script.sol";
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import {ERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {TransparentUpgradeableProxy, ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 
 import {MeritManager as MM} from "../src/MeritManager.sol";
 import {TotemFactory as TF} from "../src/TotemFactory.sol";
@@ -17,6 +18,8 @@ import {MYTHO} from "../src/MYTHO.sol";
 import {Treasury} from "../src/Treasury.sol";
 import {AddressRegistry} from "../src/AddressRegistry.sol";
 import {MockToken} from "../test/mocks/MockToken.sol";
+import {MinatoFaucet} from "../src/utils/MinatoFaucet.sol";
+import {TokenHoldersOracle} from "../src/utils/TokenHoldersOracle.sol";
 
 import {IUniswapV2Factory} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import {IUniswapV2Pair} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Pair.sol";
@@ -90,10 +93,39 @@ contract Do is Script {
     function run() public {
         fork(minato);
 
-        console.log("merit vesting 1:", mytho.meritVestingYear1());
-        console.log("merit vesting 2:", mytho.meritVestingYear2());
-        console.log("merit vesting 3:", mytho.meritVestingYear3());
-        console.log("merit vesting 4:", mytho.meritVestingYear4());
+        updateFactory(
+            0x2CF33a81ddF97dA64b6ca3931B7Cc1895a747E60, 
+            0xF0a09aC7a2242977566c8F8dF4F944ed7D333047
+        );
+
+        updateTotem(0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec);
+
+        // TokenHoldersOracle oracle = new TokenHoldersOracle(
+        //     0x3704dc1eefCDCE04C58813836AEcfdBC8e7cB3D8,
+        //     0x62470fbE6768C723678886ddD574B818a4aba59e
+        // );
+
+        // oracle.setGasLimit(300_000);
+        // oracle.setSubscriptionId(41);
+
+        // registry.setAddress(bytes32("TOKEN_HOLDERS_ORACLE"), address(oracle));
+
+        // console.log("TokenHoldersOracle deployed at:", address(oracle));
+    }
+
+    function updateFactory(address _proxyAdminAddr, address _factoryAddr) internal {
+        ProxyAdmin admin = ProxyAdmin(_proxyAdminAddr);
+        TF impl = new TF();
+        admin.upgradeAndCall(
+            ITransparentUpgradeableProxy(_factoryAddr),
+            address(impl),
+            ""
+        );
+    }
+
+    function updateTotem(address _totemBeaconProxyAddr) internal {
+        UpgradeableBeacon totemBeaconProxy = UpgradeableBeacon(_totemBeaconProxyAddr);
+        totemBeaconProxy.upgradeTo(address(new Totem()));
     }
 
     function fork(uint256 _forkId) internal {

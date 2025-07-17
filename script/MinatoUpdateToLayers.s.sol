@@ -7,16 +7,16 @@ import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/Upgradeabl
 import {TransparentUpgradeableProxy, ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 
-import {MeritManager as MM} from "../src/forUpdate/MeritManagerForUpdate.sol";
-import {TotemFactory as TF} from "../src/forUpdate/TotemFactoryForUpdate.sol";
-import {TotemTokenDistributor as TTD} from "../src/forUpdate/TotemTokenDistributorForUpdate.sol";
-import {Totem} from "../src/forUpdate/TotemForUpdate.sol";
-import {MYTHO} from "../src/forUpdate/MYTHOForUpdate.sol";
-import {Treasury} from "../src/forUpdate/TreasuryForUpdate.sol";
-import {AddressRegistry} from "../src/forUpdate/AddressRegistryForUpdate.sol";
-import {Layers} from "../src/forUpdate/LayersForUpdate.sol";
-import {Shards} from "../src/forUpdate/ShardsForUpdate.sol";
-import {TokenHoldersOracle} from "../src/forUpdate/utils/TokenHoldersOracleForUpdate.sol";
+import {MeritManager as MM} from "../src/MeritManager.sol";
+import {TotemFactory as TF} from "../src/TotemFactory.sol";
+import {TotemTokenDistributor as TTD} from "../src/TotemTokenDistributor.sol";
+import {Totem} from "../src/Totem.sol";
+import {MYTHO} from "../src/MYTHO.sol";
+import {Treasury} from "../src/Treasury.sol";
+import {AddressRegistry} from "../src/AddressRegistry.sol";
+import {Layers} from "../src/Layers.sol";
+import {Shards} from "../src/Shards.sol";
+import {TokenHoldersOracle} from "../src/utils/TokenHoldersOracle.sol";
 
 import {MockToken} from "../test/mocks/MockToken.sol";
 
@@ -132,8 +132,8 @@ contract MinatoUpdateToLayers is Script {
 // Address Registry:      0x8c41642801687A4F2f6C31aB40b3Ab74c3809e5E // 0x1149880b95e8bf4e27637151969fd4db1daee07e
 // MeritManager:          0x622A3667AA0A879EEB63011c63B6395feBe38880 // 0x35927e216824d08903140511f4217d5e6037143f
 // MYTHO:                 0x8651355f756075f26cc9568114fFe87B3Faffd4a // 0x0d915403101ef77cf70a867cc37710315b549fad
-// Beacon:                0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec // 0xa9aC2c4e7bd9175AA647000B9D6D4e5617a857be
-// TotemFactory:          0xF0a09aC7a2242977566c8F8dF4F944ed7D333047 // 0x5b839a90dc51cb2a162eef09e7a540897b7c7ce3
+// Beacon:                0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec // 0x23AEC98C1636110c9A56c6D4b14D839777e3f786
+// TotemFactory:          0xF0a09aC7a2242977566c8F8dF4F944ed7D333047 // 0xfCE408a315d8ABf11A8a001642Ddc3Dc7C0815AB
 // TotemTokenDistributor: 0x652F0E0F01F5a9376cA1a8704c3F849861242C91 // 0x824e216bb64d8e262a1f63b63215b1688e51aea5
 // Treasury:              0x62470fbE6768C723678886ddD574B818a4aba59e // 0x9d399a9f4f245d1bf1636d70ef5a246395f8de87
 
