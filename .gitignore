@@ -15,6 +15,8 @@ docs/
 flattened/
 # src/forUpdate/
 
+.next/
+
 promptDesc.txt
 promptCode.txt
 combined/CombinedContracts.sol
