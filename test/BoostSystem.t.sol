@@ -1253,13 +1253,13 @@ contract BoostSystemTest is Test {
         assertEq(price, newPrice, "Should update premium boost price");
     }
 
-    function test_manager_setBoostInterval() public {
-        uint256 newInterval = 12 hours;
+    function test_manager_setFreeBoostCooldown() public {
+        uint256 newCooldown = 12 hours;
         
         prank(deployer);
-        boostSystem.setBoostInterval(newInterval);
+        boostSystem.setFreeBoostCooldown(newCooldown);
 
-        assertEq(boostSystem.getBoostInterval(), newInterval, "Should update boost interval");
+        assertEq(boostSystem.getFreeBoostCooldown(), newCooldown, "Should update free boost cooldown");
     }
 
     // SIGNATURE VERIFICATION TESTS
@@ -2181,10 +2181,10 @@ contract BoostSystemTest is Test {
             _totemAddr
         );
         if (lastBoostTimestamp > 0) {
-            uint256 boostInterval = boostSystem.getBoostInterval();
-            if (block.timestamp < lastBoostTimestamp + boostInterval) {
+            uint256 freeBoostCooldown = boostSystem.getFreeBoostCooldown();
+            if (block.timestamp < lastBoostTimestamp + freeBoostCooldown) {
                 uint256 timeToWait = lastBoostTimestamp +
-                    boostInterval -
+                    freeBoostCooldown -
                     block.timestamp;
                 warp(timeToWait + 1);
             }
