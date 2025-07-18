@@ -39,8 +39,8 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     // State variables
     address private registryAddr;
     uint256 private minTotemTokensAmountForBoost;
-    uint256 private boostInterval;
-    uint256 private boostWindow; // Window for premium boost grace days
+    uint256 private freeBoostCooldown; // Time between free boosts
+    uint256 private premiumBoostGracePeriod; // Time between premium boosts to earn grace days
 
     // Premium boost configuration
     uint256 private premiumBoostPrice;
@@ -63,6 +63,10 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     mapping(bytes32 signatureHash => bool used) private usedSignatures; // Prevent signature replay
     mapping(address user => mapping(uint256 milestone => uint256 availableBadges))
         private availableBadges; // Available badges for minting per user per milestone
+    mapping(address user => mapping(address totemAddr => mapping(uint256 periodNum => uint256 meritAmount))) 
+        public userTotemPeriodMerit; // Individual user merit contribution per totem per period
+    mapping(address user => mapping(uint256 periodNum => uint256 totalMerit)) 
+        public userTotalPeriodMerit; // Total user merit contribution per period across all totems
 
     // Structs
     struct BoostData {
@@ -107,6 +111,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     event GraceDayEarned(address indexed user, address indexed totemAddr, uint256 graceDaysEarned); // prettier-ignore
     event MilestoneAchieved(address indexed user, address indexed totemAddr, uint256 milestone, uint256 streakDays); // prettier-ignore
     event BadgeMinted(address indexed user, address indexed totemAddr, uint256 milestone, uint256 tokenId); // prettier-ignore
+    event UserMeritCredited(address indexed user, address indexed totemAddr, uint256 amount, uint256 period); // prettier-ignore
 
     /**
      * @notice Initialize the BoostSystem contract
@@ -134,6 +139,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         );
         factory = TotemFactory(AddressRegistry(registryAddr).getTotemFactory());
         treasury = AddressRegistry(registryAddr).getMythoTreasury();
+        badgeNFT = BadgeNFT(AddressRegistry(registryAddr).getBadgeNFT());
 
         // VRF Configuration - Initialize manually since we can't use constructor in upgradeable contract
         if (_vrfCoordinator == address(0)) revert VRFNotConfigured();
@@ -146,10 +152,10 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         // default values
         minTotemTokensAmountForBoost = 1e18;
-        boostInterval = 1 days;
+        freeBoostCooldown = 1 days;
         boostRewardPoints = 100; // 100 merit points for boost
         premiumBoostPrice = 5e16; // Base price of premium boost
-        boostWindow = 24 hours; // Default window for premium boost grace days
+        premiumBoostGracePeriod = 24 hours; // Default period for premium boost grace days
         signatureValidityWindow = 5 minutes; // Default signature validity window
 
         // Initialize milestones for NFT badges
@@ -195,7 +201,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         _verifySignature(_totemAddr, _timestamp, _signature);
 
         BoostData storage boostData = boosts[msg.sender][_totemAddr];
-        if (boostData.lastBoostTimestamp + boostInterval > block.timestamp)
+        if (boostData.lastBoostTimestamp + freeBoostCooldown > block.timestamp)
             revert NotEnoughTimePassedForFreeBoost();
 
         _updateStreakStartPoint(_totemAddr);
@@ -206,10 +212,16 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         uint256 streakPoints = _getStreakPoints(_totemAddr, boostRewardPoints);
 
+        // Record user merit contribution
+        uint256 currentPeriod = meritManager.currentPeriod();
+        userTotemPeriodMerit[msg.sender][_totemAddr][currentPeriod] += streakPoints;
+        userTotalPeriodMerit[msg.sender][currentPeriod] += streakPoints;
+
         // credit merit points
         meritManager.boostReward(_totemAddr, streakPoints);
 
         emit TotemBoosted(msg.sender, _totemAddr);
+        emit UserMeritCredited(msg.sender, _totemAddr, streakPoints, currentPeriod);
     }
 
     /**
@@ -241,9 +253,9 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         // Check for badge achievements after updating streak
         _checkBadgesAfterBoost(_totemAddr);
 
-        // Grant grace day if boostWindow time passed since last premium boost
+        // Grant grace day if premiumBoostGracePeriod time passed since last premium boost
         if (
-            block.timestamp - boostData.lastPremiumBoostTimestamp >= boostWindow
+            block.timestamp - boostData.lastPremiumBoostTimestamp >= premiumBoostGracePeriod
         ) {
             boostData.graceDaysEarned++;
             emit GraceDayEarned(msg.sender, _totemAddr, boostData.graceDaysEarned);
@@ -330,25 +342,30 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     }
 
     /**
-     * @notice Sets the boost interval (time between free boosts)
-     * @param _boostInterval New boost interval in seconds (default: 1 day)
+     * @notice Sets the free boost cooldown (time between free boosts)
+     * @param _freeBoostCooldown New free boost cooldown in seconds (default: 1 day)
      * @dev This affects how often users can perform free boosts
      */
-    function setBoostInterval(
-        uint256 _boostInterval
+    function setFreeBoostCooldown(
+        uint256 _freeBoostCooldown
     ) external onlyRole(MANAGER) {
-        boostInterval = _boostInterval;
-        emit ParameterUpdated("boostInterval", _boostInterval);
+        freeBoostCooldown = _freeBoostCooldown;
+        emit ParameterUpdated("freeBoostCooldown", _freeBoostCooldown);
     }
 
     /**
-     * @notice Sets the boost window for premium boost grace days
-     * @param _boostWindow New boost window duration (default: 24 hours)
-     * @dev Grace days from premium boost are earned if boostWindow time passed since last premium boost
+     * @notice Sets the premium boost grace period (time between premium boosts to earn grace days)
+     * @param _premiumBoostGracePeriod New premium boost grace period in seconds (default: 24 hours)
+     * @dev Grace days from premium boost are earned if premiumBoostGracePeriod time passed since last premium boost
      */
-    function setBoostWindow(uint256 _boostWindow) external onlyRole(MANAGER) {
-        boostWindow = _boostWindow;
-        emit ParameterUpdated("boostWindow", _boostWindow);
+    function setPremiumBoostGracePeriod(
+        uint256 _premiumBoostGracePeriod
+    ) external onlyRole(MANAGER) {
+        premiumBoostGracePeriod = _premiumBoostGracePeriod;
+        emit ParameterUpdated(
+            "premiumBoostGracePeriod",
+            _premiumBoostGracePeriod
+        );
     }
 
     /**
@@ -447,14 +464,14 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         // For existing streaks, check if the last boost was less than 2 boost intervals ago
         if (
             boostData.streakStartPoint != 0 && (
-                block.timestamp - boostData.lastBoostTimestamp < boostInterval * 2 ||
-                block.timestamp - boostData.lastPremiumBoostTimestamp < boostInterval * 2
+                block.timestamp - boostData.lastBoostTimestamp < freeBoostCooldown * 2 ||
+                block.timestamp - boostData.lastPremiumBoostTimestamp < freeBoostCooldown * 2
             )
         ) return;
 
         // Calculate how many grace days should be earned from 30-day streaks
         if (boostData.streakStartPoint != 0) {
-            uint256 streakDays = (block.timestamp - boostData.streakStartPoint) / boostInterval + 1;
+            uint256 streakDays = (block.timestamp - boostData.streakStartPoint) / freeBoostCooldown + 1;
             uint256 expectedGraceDaysFromStreak = streakDays / 30;
 
             // Add new grace days from streak (only add the difference)
@@ -507,7 +524,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     ) internal view returns (uint256) {
         BoostData storage boostData = boosts[_user][_totemAddr];
         if (boostData.streakStartPoint == 0) return _basePoints;
-        uint256 streak = (block.timestamp - boostData.streakStartPoint) / boostInterval + 1; // prettier-ignore
+        uint256 streak = (block.timestamp - boostData.streakStartPoint) / freeBoostCooldown + 1; // prettier-ignore
         if (streak > 30) streak = 30;
         return (_basePoints * (100 + (streak - 1) * 5)) / 100;
     }
@@ -594,7 +611,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         if (boostData.streakStartPoint != 0) {
             currentStreak =
                 (block.timestamp - boostData.streakStartPoint) /
-                boostInterval +
+                freeBoostCooldown +
                 1;
         }
 
@@ -641,6 +658,73 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         }
     }
 
+    // VRF CALLBACK FUNCTION
+
+    /**
+     * @notice Callback function used by VRF Coordinator to fulfill random words request
+     * @param _requestId The ID of the VRF request
+     * @param _randomWords Array of random words returned by VRF
+     * @dev Calculates base reward, applies streak multiplier, and credits merit points
+     */
+    function fulfillRandomWords(
+        uint256 _requestId,
+        uint256[] memory _randomWords
+    ) internal {
+        PendingBoost memory pendingBoost = pendingBoosts[_requestId];
+        require(pendingBoost.user != address(0), "Request not found");
+
+        // Get base reward from VRF probabilities
+        uint256 baseReward = _calculateBaseReward(_randomWords[0]);
+
+        // Apply streak points calculation consistently with free boost
+        // We need to temporarily set msg.sender context for _getStreakPoints
+        address originalUser = pendingBoost.user;
+        uint256 finalReward = _getStreakPointsForUser(
+            originalUser,
+            pendingBoost.totemAddr,
+            baseReward
+        );
+
+        // Record user merit contribution
+        uint256 currentPeriod = meritManager.currentPeriod();
+        userTotemPeriodMerit[originalUser][pendingBoost.totemAddr][currentPeriod] += finalReward;
+        userTotalPeriodMerit[originalUser][currentPeriod] += finalReward;
+
+        // Credit merit points
+        meritManager.boostReward(pendingBoost.totemAddr, finalReward);
+
+        // Clean up
+        delete pendingBoosts[_requestId];
+
+        emit PremiumBoostCompleted(
+            originalUser,
+            pendingBoost.totemAddr,
+            baseReward,
+            finalReward - baseReward, // Streak bonus
+            finalReward
+        );
+        emit UserMeritCredited(originalUser, pendingBoost.totemAddr, finalReward, currentPeriod);
+    }
+
+    /**
+     * @notice Raw fulfillment function called by VRF Coordinator
+     * @param _requestId The ID of the VRF request
+     * @param _randomWords Array of random words returned by VRF
+     * @dev Only callable by VRF Coordinator, delegates to internal fulfillRandomWords
+     */
+    function rawFulfillRandomWords(
+        uint256 _requestId,
+        uint256[] memory _randomWords
+    ) external {
+        if (msg.sender != address(vrfCoordinator)) {
+            revert OnlyCoordinatorCanFulfill(
+                msg.sender,
+                address(vrfCoordinator)
+            );
+        }
+        fulfillRandomWords(_requestId, _randomWords);
+    }
+
     // VIEW FUNCTIONS
 
     /**
@@ -657,19 +741,19 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     }
 
     /**
-     * @notice Gets the boost interval (time between free boosts)
-     * @return Boost interval in seconds
+     * @notice Gets the free boost cooldown (time between free boosts)
+     * @return Free boost cooldown in seconds
      */
-    function getBoostInterval() external view returns (uint256) {
-        return boostInterval;
+    function getFreeBoostCooldown() external view returns (uint256) {
+        return freeBoostCooldown;
     }
 
     /**
-     * @notice Gets the boost window for premium boost grace days
-     * @return Boost window duration in seconds
+     * @notice Gets the premium boost grace period (time between premium boosts to earn grace days)
+     * @return Premium boost grace period in seconds
      */
-    function getBoostWindow() external view returns (uint256) {
-        return boostWindow;
+    function getPremiumBoostGracePeriod() external view returns (uint256) {
+        return premiumBoostGracePeriod;
     }
 
     /**
@@ -684,7 +768,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     ) external view returns (uint256) {
         return
             boosts[_user][_totemAddr].lastBoostTimestamp +
-            boostInterval -
+            freeBoostCooldown -
             block.timestamp;
     }
 
@@ -753,7 +837,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         streakDays =
             (block.timestamp - data.streakStartPoint) /
-            boostInterval +
+            freeBoostCooldown +
             1;
         if (streakDays > 30) streakDays = 30;
 
@@ -835,7 +919,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         if (data.streakStartPoint != 0) {
             streak =
                 (block.timestamp - data.streakStartPoint) /
-                boostInterval +
+                freeBoostCooldown +
                 1;
             if (streak > 30) streak = 30;
         }
@@ -976,65 +1060,68 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         return availableBadges[_user][_milestone];
     }
 
-    // VRF CALLBACK FUNCTION
-
     /**
-     * @notice Callback function used by VRF Coordinator to fulfill random words request
-     * @param _requestId The ID of the VRF request
-     * @param _randomWords Array of random words returned by VRF
-     * @dev Calculates base reward, applies streak multiplier, and credits merit points
+     * @notice Get user's merit contribution to a specific totem in a specific period
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @param _periodNum Period number
+     * @return Merit points contributed by user to totem in period
      */
-    function fulfillRandomWords(
-        uint256 _requestId,
-        uint256[] memory _randomWords
-    ) internal {
-        PendingBoost memory pendingBoost = pendingBoosts[_requestId];
-        require(pendingBoost.user != address(0), "Request not found");
-
-        // Get base reward from VRF probabilities
-        uint256 baseReward = _calculateBaseReward(_randomWords[0]);
-
-        // Apply streak points calculation consistently with free boost
-        // We need to temporarily set msg.sender context for _getStreakPoints
-        address originalUser = pendingBoost.user;
-        uint256 finalReward = _getStreakPointsForUser(
-            originalUser,
-            pendingBoost.totemAddr,
-            baseReward
-        );
-
-        // Credit merit points
-        meritManager.boostReward(pendingBoost.totemAddr, finalReward);
-
-        // Clean up
-        delete pendingBoosts[_requestId];
-
-        emit PremiumBoostCompleted(
-            originalUser,
-            pendingBoost.totemAddr,
-            baseReward,
-            finalReward - baseReward, // Streak bonus
-            finalReward
-        );
+    function getUserTotemMerit(
+        address _user,
+        address _totemAddr,
+        uint256 _periodNum
+    ) external view returns (uint256) {
+        return userTotemPeriodMerit[_user][_totemAddr][_periodNum];
     }
 
     /**
-     * @notice Raw fulfillment function called by VRF Coordinator
-     * @param _requestId The ID of the VRF request
-     * @param _randomWords Array of random words returned by VRF
-     * @dev Only callable by VRF Coordinator, delegates to internal fulfillRandomWords
+     * @notice Get user's total merit contribution in a specific period across all totems
+     * @param _user User address
+     * @param _periodNum Period number
+     * @return Total merit points contributed by user in period
      */
-    function rawFulfillRandomWords(
-        uint256 _requestId,
-        uint256[] memory _randomWords
-    ) external {
-        if (msg.sender != address(vrfCoordinator)) {
-            revert OnlyCoordinatorCanFulfill(
-                msg.sender,
-                address(vrfCoordinator)
-            );
-        }
-        fulfillRandomWords(_requestId, _randomWords);
+    function getUserTotalMerit(
+        address _user,
+        uint256 _periodNum
+    ) external view returns (uint256) {
+        return userTotalPeriodMerit[_user][_periodNum];
+    }
+
+    /**
+     * @notice Calculate user's share of MYTHO rewards for a specific totem in a period
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @param _periodNum Period number
+     * @return Estimated MYTHO tokens user would receive based on their merit contribution
+     */
+    function getUserTotemMythoShare(
+        address _user,
+        address _totemAddr,
+        uint256 _periodNum
+    ) external view returns (uint256) {
+        uint256 userMerit = userTotemPeriodMerit[_user][_totemAddr][_periodNum];
+        if (userMerit == 0) return 0;
+
+        uint256 totalTotemMerit = meritManager.getTotemMeritPoints(_totemAddr, _periodNum);
+        if (totalTotemMerit == 0) return 0;
+
+        uint256 totemPendingReward = meritManager.getPendingReward(_totemAddr, _periodNum);
+        return (totemPendingReward * userMerit) / totalTotemMerit;
+    }
+
+    /**
+     * @notice Get user's merit contribution to current period for a specific totem
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @return Merit points contributed by user to totem in current period
+     */
+    function getUserCurrentPeriodMerit(
+        address _user,
+        address _totemAddr
+    ) external view returns (uint256) {
+        uint256 currentPeriod = meritManager.currentPeriod();
+        return userTotemPeriodMerit[_user][_totemAddr][currentPeriod];
     }
 
     /**
