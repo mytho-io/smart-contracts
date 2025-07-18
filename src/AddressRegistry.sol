@@ -20,12 +20,12 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant MYTHO_TOKEN = "MYTHO_TOKEN";
     bytes32 private constant MYTHO_TREASURY = "MYTHO_TREASURY";
     bytes32 private constant TOTEM_FACTORY = "TOTEM_FACTORY";
-    bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR =
-        "TOTEM_TOKEN_DISTRIBUTOR";
+    bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR = "TOTEM_TOKEN_DISTRIBUTOR";
     bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
     bytes32 private constant SHARDS = "SHARDS";
     bytes32 private constant LAYERS = "LAYERS";
     bytes32 private constant BOOST_SYSTEM = "BOOST_SYSTEM";
+    bytes32 private constant BADGE_NFT = "BADGE_NFT";
 
     // Events
     event AddressSet(bytes32 indexed id, address oldAddress, address newAddress); // prettier-ignore
@@ -156,6 +156,14 @@ contract AddressRegistry is AccessControlUpgradeable {
      */
     function getBoostSystem() external view returns (address) {
         return getAddress(BOOST_SYSTEM);
+    }
+
+    /**
+     * @notice Gets the address of the BadgeNFT contract
+     * @return Address of the BadgeNFT contract
+     */
+    function getBadgeNFT() external view returns (address) {
+        return getAddress(BADGE_NFT);
     }
 
     /**
