@@ -16,6 +16,7 @@ flattened/
 # src/forUpdate/
 
 .next/
+.kiro/
 
 promptDesc.txt
 promptCode.txt
