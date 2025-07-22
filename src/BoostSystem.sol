@@ -63,20 +63,23 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     mapping(bytes32 signatureHash => bool used) private usedSignatures; // Prevent signature replay
     mapping(address user => mapping(uint256 milestone => uint256 availableBadges))
         private availableBadges; // Available badges for minting per user per milestone
-    mapping(address user => mapping(address totemAddr => mapping(uint256 periodNum => uint256 meritAmount))) 
+    mapping(address user => mapping(address totemAddr => mapping(uint256 periodNum => uint256 meritAmount)))
         public userTotemPeriodMerit; // Individual user merit contribution per totem per period
-    mapping(address user => mapping(uint256 periodNum => uint256 totalMerit)) 
+    mapping(address user => mapping(uint256 periodNum => uint256 totalMerit))
         public userTotalPeriodMerit; // Total user merit contribution per period across all totems
 
     // Structs
     struct BoostData {
         uint256 lastBoostTimestamp;
         uint256 lastPremiumBoostTimestamp;
+        uint256 lastPremiumGraceDayTimestamp; // Track when last grace day from premium boost was earned
         uint256 streakStartPoint;
         uint256 graceDaysWasted;
         uint256 graceDaysEarned;
         uint256 graceDaysFromStreak; // Track grace days earned from streak separately
         uint256 releasedBadges; // Number of badge releases (milestone achievements)
+        uint256 actualStreakDays; // Track actual consecutive boost days
+        uint256 lastStreakIncrementTimestamp; // Track when streak was last incremented
     }
 
     struct PendingBoost {
@@ -154,7 +157,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         minTotemTokensAmountForBoost = 1e18;
         freeBoostCooldown = 1 days;
         boostRewardPoints = 100; // 100 merit points for boost
-        premiumBoostPrice = 5e16; // Base price of premium boost
+        premiumBoostPrice = 0.00003 ether; // Base price of premium boost
         premiumBoostGracePeriod = 24 hours; // Default period for premium boost grace days
         signatureValidityWindow = 5 minutes; // Default signature validity window
 
@@ -214,14 +217,21 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         // Record user merit contribution
         uint256 currentPeriod = meritManager.currentPeriod();
-        userTotemPeriodMerit[msg.sender][_totemAddr][currentPeriod] += streakPoints;
+        userTotemPeriodMerit[msg.sender][_totemAddr][
+            currentPeriod
+        ] += streakPoints;
         userTotalPeriodMerit[msg.sender][currentPeriod] += streakPoints;
 
         // credit merit points
         meritManager.boostReward(_totemAddr, streakPoints);
 
         emit TotemBoosted(msg.sender, _totemAddr);
-        emit UserMeritCredited(msg.sender, _totemAddr, streakPoints, currentPeriod);
+        emit UserMeritCredited(
+            msg.sender,
+            _totemAddr,
+            streakPoints,
+            currentPeriod
+        );
     }
 
     /**
@@ -247,17 +257,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         // Process payment in native tokens (ETH) using Address library
         Address.sendValue(payable(treasury), premiumBoostPrice);
 
-        // Update streak system
-        _updateStreakStartPoint(_totemAddr);
-
-        // Check for badge achievements after updating streak
-        _checkBadgesAfterBoost(_totemAddr);
-
-        // Grant grace day if premiumBoostGracePeriod time passed since last premium boost
+        // Grant grace day if premiumBoostGracePeriod time passed since last grace day from premium boost
         if (
-            block.timestamp - boostData.lastPremiumBoostTimestamp >= premiumBoostGracePeriod
+            block.timestamp - boostData.lastPremiumGraceDayTimestamp >= premiumBoostGracePeriod
         ) {
             boostData.graceDaysEarned++;
+            boostData.lastPremiumGraceDayTimestamp = block.timestamp; // Update timestamp when grace day is earned
             emit GraceDayEarned(msg.sender, _totemAddr, boostData.graceDaysEarned);
         } // prettier-ignore
 
@@ -451,6 +456,57 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         emit ParameterUpdated("badgeNFT", uint256(uint160(_badgeNFT)));
     }
 
+    /**
+     * @notice TESTING ONLY: Simulate time travel by moving last boost timestamp back in time
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @param _hoursBack Number of hours to move back in time (simulates time passing)
+     * @dev This function simulates time passing since the last boost:
+     *      - If _hoursBack < 24: User can boost again, streak continues
+     *      - If 24 <= _hoursBack < 48: User can boost, streak continues (within 2x cooldown)
+     *      - If _hoursBack >= 48: Streak will reset on next boost (unless grace days available)
+     */
+    function simulateTimePassingForTesting(
+        address _user,
+        address _totemAddr,
+        uint256 _hoursBack
+    ) external onlyRole(MANAGER) {
+        BoostData storage boostData = boosts[_user][_totemAddr];
+
+        // If user never boosted, initialize streak
+        if (boostData.streakStartPoint == 0) {
+            boostData.streakStartPoint =
+                block.timestamp -
+                (1 * freeBoostCooldown);
+            boostData.lastBoostTimestamp =
+                block.timestamp -
+                (1 * freeBoostCooldown);
+            boostData.lastStreakIncrementTimestamp =
+                block.timestamp -
+                (1 * freeBoostCooldown);
+        }
+
+        // Move last boost timestamp back by specified hours
+        uint256 timeToSubtract = _hoursBack * 1 hours;
+        boostData.lastBoostTimestamp = block.timestamp - timeToSubtract;
+
+        // Also move premium boost timestamp back if it exists
+        if (boostData.lastPremiumBoostTimestamp > 0) {
+            boostData.lastPremiumBoostTimestamp =
+                block.timestamp -
+                timeToSubtract;
+        }
+
+        // Also move last streak increment timestamp back if it exists
+        if (boostData.lastStreakIncrementTimestamp > 0) {
+            boostData.lastStreakIncrementTimestamp =
+                block.timestamp -
+                timeToSubtract;
+        }
+
+        emit ParameterUpdated("timeSimulationTesting", _hoursBack);
+    }
+
     // INTERNAL FUNCTIONS
 
     /**
@@ -459,43 +515,8 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
      * @dev Manages streak continuation, grace day consumption, and streak reset logic
      */
     function _updateStreakStartPoint(address _totemAddr) internal {
-        BoostData storage boostData = boosts[msg.sender][_totemAddr];
-
-        // For existing streaks, check if the last boost was less than 2 boost intervals ago
-        if (
-            boostData.streakStartPoint != 0 && (
-                block.timestamp - boostData.lastBoostTimestamp < freeBoostCooldown * 2 ||
-                block.timestamp - boostData.lastPremiumBoostTimestamp < freeBoostCooldown * 2
-            )
-        ) return;
-
-        // Calculate how many grace days should be earned from 30-day streaks
-        if (boostData.streakStartPoint != 0) {
-            uint256 streakDays = (block.timestamp - boostData.streakStartPoint) / freeBoostCooldown + 1;
-            uint256 expectedGraceDaysFromStreak = streakDays / 30;
-
-            // Add new grace days from streak (only add the difference)
-            if (expectedGraceDaysFromStreak > boostData.graceDaysFromStreak) {
-                uint256 newGraceDaysFromStreak = expectedGraceDaysFromStreak - boostData.graceDaysFromStreak;
-                boostData.graceDaysFromStreak = expectedGraceDaysFromStreak;
-                boostData.graceDaysEarned += newGraceDaysFromStreak;
-                emit GraceDayEarned(msg.sender, _totemAddr, boostData.graceDaysEarned);
-            }
-        }
-
-        // if user has available grace days, consume one instead of resetting streak
-        if (boostData.graceDaysEarned > boostData.graceDaysWasted) {
-            boostData.graceDaysWasted++;
-            return;
-        }
-
-        // reset streak
-        boostData.graceDaysWasted = 0;
-        boostData.graceDaysEarned = 0;
-        boostData.graceDaysFromStreak = 0;
-        boostData.releasedBadges = 0; // Reset badge counter for new streak
-        boostData.streakStartPoint = block.timestamp;
-    } // prettier-ignore
+        _updateStreakStartPointForUser(msg.sender, _totemAddr);
+    }
 
     /**
      * @notice Calculate streak points for current user
@@ -524,7 +545,8 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
     ) internal view returns (uint256) {
         BoostData storage boostData = boosts[_user][_totemAddr];
         if (boostData.streakStartPoint == 0) return _basePoints;
-        uint256 streak = (block.timestamp - boostData.streakStartPoint) / freeBoostCooldown + 1; // prettier-ignore
+        
+        uint256 streak = boostData.actualStreakDays;
         if (streak > 30) streak = 30;
         return (_basePoints * (100 + (streak - 1) * 5)) / 100;
     }
@@ -604,18 +626,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
      * @param _totemAddr Totem address
      */
     function _checkBadgesAfterBoost(address _totemAddr) internal {
-        BoostData storage boostData = boosts[msg.sender][_totemAddr];
-
-        // Calculate current streak
-        uint256 currentStreak = 0;
-        if (boostData.streakStartPoint != 0) {
-            currentStreak =
-                (block.timestamp - boostData.streakStartPoint) /
-                freeBoostCooldown +
-                1;
-        }
-
-        _checkAndReleaseBadges(msg.sender, _totemAddr, currentStreak);
+        _checkBadgesAfterBoostForUser(msg.sender, _totemAddr);
     }
 
     /**
@@ -658,6 +669,123 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         }
     }
 
+    /**
+     * @notice Updates streak start point for specific user (used in VRF callback)
+     * @param _user User address
+     * @param _totemAddr Address of the totem
+     * @dev Similar to _updateStreakStartPoint but works with specific user instead of msg.sender
+     */
+    function _updateStreakStartPointForUser(address _user, address _totemAddr) internal {
+        BoostData storage boostData = boosts[_user][_totemAddr];
+
+        // Migration logic: Initialize new fields for existing users
+        if (boostData.streakStartPoint != 0 && boostData.actualStreakDays == 0) {
+            // This is an existing user with old data structure
+            // Calculate actual streak days based on time elapsed
+            uint256 timeElapsed = block.timestamp - boostData.streakStartPoint;
+            boostData.actualStreakDays = (timeElapsed / freeBoostCooldown) + 1;
+            if (boostData.actualStreakDays > 30) boostData.actualStreakDays = 30; // Cap at 30
+            boostData.lastStreakIncrementTimestamp = boostData.streakStartPoint + ((boostData.actualStreakDays - 1) * freeBoostCooldown);
+        }
+
+        // If this is the first boost ever, initialize streak
+        if (boostData.streakStartPoint == 0) {
+            boostData.streakStartPoint = block.timestamp;
+            boostData.actualStreakDays = 1;
+            boostData.lastStreakIncrementTimestamp = block.timestamp;
+            return;
+        }
+
+        // For existing streaks, check if the last boost (any type) was less than 2 boost intervals ago
+        uint256 lastBoostTime = boostData.lastBoostTimestamp > boostData.lastPremiumBoostTimestamp ? 
+            boostData.lastBoostTimestamp : boostData.lastPremiumBoostTimestamp;
+        
+        if (block.timestamp - lastBoostTime < freeBoostCooldown * 2) {
+            // Continue streak - but only increment if 24+ hours passed since last increment
+            if (block.timestamp - boostData.lastStreakIncrementTimestamp >= freeBoostCooldown) {
+                boostData.actualStreakDays++;
+                boostData.lastStreakIncrementTimestamp = block.timestamp;
+                
+                // Check if we should award grace days for reaching 30-day milestones
+                uint256 expectedGraceDaysFromStreak = boostData.actualStreakDays / 30;
+                if (expectedGraceDaysFromStreak > boostData.graceDaysFromStreak) {
+                    uint256 newGraceDaysFromStreak = expectedGraceDaysFromStreak - boostData.graceDaysFromStreak;
+                    boostData.graceDaysFromStreak = expectedGraceDaysFromStreak;
+                    boostData.graceDaysEarned += newGraceDaysFromStreak;
+                    emit GraceDayEarned(_user, _totemAddr, boostData.graceDaysEarned);
+                }
+            }
+            
+            return;
+        }
+
+        // Calculate how many grace days should be earned from 30-day streaks BEFORE checking if streak should be reset
+        if (boostData.streakStartPoint != 0) {
+            uint256 expectedGraceDaysFromStreak = boostData.actualStreakDays / 30;
+
+            // Add new grace days from streak (only add the difference)
+            if (expectedGraceDaysFromStreak > boostData.graceDaysFromStreak) {
+                uint256 newGraceDaysFromStreak = expectedGraceDaysFromStreak - boostData.graceDaysFromStreak;
+                boostData.graceDaysFromStreak = expectedGraceDaysFromStreak;
+                boostData.graceDaysEarned += newGraceDaysFromStreak;
+                emit GraceDayEarned(_user, _totemAddr, boostData.graceDaysEarned);
+            }
+        }
+
+        // Calculate how many days were skipped (beyond the allowed 2x cooldown)
+        uint256 timeSinceLastBoost = block.timestamp - lastBoostTime;
+        uint256 allowedGracePeriod = freeBoostCooldown * 2;
+        
+        if (timeSinceLastBoost >= allowedGracePeriod) {
+            // Calculate how many additional days were skipped beyond the grace period
+            uint256 extraTimeSkipped = timeSinceLastBoost - allowedGracePeriod;
+            uint256 daysSkipped = (extraTimeSkipped + freeBoostCooldown - 1) / freeBoostCooldown; // Round up
+            
+            // For exactly 2 days skip (which equals allowedGracePeriod), we should use 1 grace day
+            if (timeSinceLastBoost == allowedGracePeriod) {
+                daysSkipped = 1;
+            }
+            
+            // Check if user has enough grace days to cover the skipped days
+            uint256 availableGraceDays = boostData.graceDaysEarned - boostData.graceDaysWasted;
+            
+            if (availableGraceDays >= daysSkipped) {
+                // Use grace days to cover skipped days
+                boostData.graceDaysWasted += daysSkipped;
+                // Grace days preserve streak but do NOT increase it
+                // However, the current boost should still increment the streak if 24+ hours passed since last increment
+                if (block.timestamp - boostData.lastStreakIncrementTimestamp >= freeBoostCooldown) {
+                    boostData.actualStreakDays++;
+                    boostData.lastStreakIncrementTimestamp = block.timestamp;
+                }
+                return;
+            }
+        }
+
+        // reset streak
+        boostData.graceDaysWasted = 0;
+        boostData.graceDaysEarned = 0;
+        boostData.graceDaysFromStreak = 0;
+        boostData.releasedBadges = 0; // Reset badge counter for new streak
+        boostData.streakStartPoint = block.timestamp;
+        boostData.actualStreakDays = 1; // Start new streak
+        boostData.lastStreakIncrementTimestamp = block.timestamp;
+    }
+
+    /**
+     * @notice Check badges after boost for specific user (used in VRF callback)
+     * @param _user User address
+     * @param _totemAddr Totem address
+     */
+    function _checkBadgesAfterBoostForUser(address _user, address _totemAddr) internal {
+        BoostData storage boostData = boosts[_user][_totemAddr];
+
+        // Use actual streak days instead of time-based calculation
+        uint256 currentStreak = boostData.actualStreakDays;
+
+        _checkAndReleaseBadges(_user, _totemAddr, currentStreak);
+    }
+
     // VRF CALLBACK FUNCTION
 
     /**
@@ -673,22 +801,28 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         PendingBoost memory pendingBoost = pendingBoosts[_requestId];
         require(pendingBoost.user != address(0), "Request not found");
 
+        // Update streak system for the user (this should happen in callback, not in premiumBoost)
+        _updateStreakStartPointForUser(pendingBoost.user, pendingBoost.totemAddr);
+
+        // Check for badge achievements after updating streak
+        _checkBadgesAfterBoostForUser(pendingBoost.user, pendingBoost.totemAddr);
+
         // Get base reward from VRF probabilities
         uint256 baseReward = _calculateBaseReward(_randomWords[0]);
 
         // Apply streak points calculation consistently with free boost
-        // We need to temporarily set msg.sender context for _getStreakPoints
-        address originalUser = pendingBoost.user;
         uint256 finalReward = _getStreakPointsForUser(
-            originalUser,
+            pendingBoost.user,
             pendingBoost.totemAddr,
             baseReward
         );
 
         // Record user merit contribution
         uint256 currentPeriod = meritManager.currentPeriod();
-        userTotemPeriodMerit[originalUser][pendingBoost.totemAddr][currentPeriod] += finalReward;
-        userTotalPeriodMerit[originalUser][currentPeriod] += finalReward;
+        userTotemPeriodMerit[pendingBoost.user][pendingBoost.totemAddr][
+            currentPeriod
+        ] += finalReward;
+        userTotalPeriodMerit[pendingBoost.user][currentPeriod] += finalReward;
 
         // Credit merit points
         meritManager.boostReward(pendingBoost.totemAddr, finalReward);
@@ -697,13 +831,18 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         delete pendingBoosts[_requestId];
 
         emit PremiumBoostCompleted(
-            originalUser,
+            pendingBoost.user,
             pendingBoost.totemAddr,
             baseReward,
             finalReward - baseReward, // Streak bonus
             finalReward
         );
-        emit UserMeritCredited(originalUser, pendingBoost.totemAddr, finalReward, currentPeriod);
+        emit UserMeritCredited(
+            pendingBoost.user,
+            pendingBoost.totemAddr,
+            finalReward,
+            currentPeriod
+        );
     }
 
     /**
@@ -778,10 +917,12 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
      * @param _totemAddr Totem address
      * @return lastBoostTimestamp Last free boost timestamp
      * @return lastPremiumBoostTimestamp Last premium boost timestamp
+     * @return lastPremiumGraceDayTimestamp Last premium grace day timestamp
      * @return streakStartPoint Streak start point
      * @return graceDaysEarned Total grace days earned
      * @return graceDaysWasted Grace days used
      * @return graceDaysFromStreak Grace days earned from streak
+     * @return actualStreakDays Actual consecutive boost days
      */
     function getBoostData(
         address _user,
@@ -792,20 +933,24 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         returns (
             uint256 lastBoostTimestamp,
             uint256 lastPremiumBoostTimestamp,
+            uint256 lastPremiumGraceDayTimestamp,
             uint256 streakStartPoint,
             uint256 graceDaysEarned,
             uint256 graceDaysWasted,
-            uint256 graceDaysFromStreak
+            uint256 graceDaysFromStreak,
+            uint256 actualStreakDays
         )
     {
         BoostData storage data = boosts[_user][_totemAddr];
         return (
             data.lastBoostTimestamp,
             data.lastPremiumBoostTimestamp,
+            data.lastPremiumGraceDayTimestamp,
             data.streakStartPoint,
             data.graceDaysEarned,
             data.graceDaysWasted,
-            data.graceDaysFromStreak
+            data.graceDaysFromStreak,
+            data.actualStreakDays
         );
     }
 
@@ -835,10 +980,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
             return (0, 100, 0);
         }
 
-        streakDays =
-            (block.timestamp - data.streakStartPoint) /
-            freeBoostCooldown +
-            1;
+        streakDays = data.actualStreakDays;
         if (streakDays > 30) streakDays = 30;
 
         streakMultiplier = 100 + (streakDays - 1) * 5;
@@ -914,15 +1056,9 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         )
     {
         BoostData storage data = boosts[_user][_totemAddr];
-        uint256 streak = 0;
+        uint256 streak = data.actualStreakDays;
 
-        if (data.streakStartPoint != 0) {
-            streak =
-                (block.timestamp - data.streakStartPoint) /
-                freeBoostCooldown +
-                1;
-            if (streak > 30) streak = 30;
-        }
+        if (streak > 30) streak = 30;
 
         uint256 multiplier = 100 + (streak - 1) * 5;
 
@@ -1103,10 +1239,16 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         uint256 userMerit = userTotemPeriodMerit[_user][_totemAddr][_periodNum];
         if (userMerit == 0) return 0;
 
-        uint256 totalTotemMerit = meritManager.getTotemMeritPoints(_totemAddr, _periodNum);
+        uint256 totalTotemMerit = meritManager.getTotemMeritPoints(
+            _totemAddr,
+            _periodNum
+        );
         if (totalTotemMerit == 0) return 0;
 
-        uint256 totemPendingReward = meritManager.getPendingReward(_totemAddr, _periodNum);
+        uint256 totemPendingReward = meritManager.getPendingReward(
+            _totemAddr,
+            _periodNum
+        );
         return (totemPendingReward * userMerit) / totalTotemMerit;
     }
 

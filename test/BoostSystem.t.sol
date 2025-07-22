@@ -443,7 +443,7 @@ contract BoostSystemTest is Test {
         mockVRFCoordinator.fulfillRandomWords(1);
 
         // Check grace day earned
-        (, , , uint256 graceDaysEarned, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned, 1, "Should have 1 grace day from premium boost");
 
         // Step 2: Build a short streak with daily boosts
@@ -452,18 +452,26 @@ contract BoostSystemTest is Test {
             _performBoost(userB, totemData.totemAddr);
         }
 
-        // Step 3: Skip a day and use grace day
+        // Step 3: Skip more than 2 days to require grace day usage
         warp(2 days);
         uint256 meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriodNum);
         _performBoost(userB, totemData.totemAddr);
         uint256 meritAfter = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriodNum);
         
-        // Should maintain streak (6th day from streak start with 5% * 5 = 25% bonus = 125 points)
-        assertEq(meritAfter - meritBefore, 125, "Should maintain streak bonus with grace day");
+        // Should maintain streak and increment to 5th day (20% bonus = 120 points)
+        assertEq(meritAfter - meritBefore, 120, "Should maintain streak bonus with grace day");
 
         // Check grace day was used
-        (, , , , uint256 graceDaysWasted, ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarnedB, uint256 graceDaysWasted, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysWasted, 1, "Should have used 1 grace day");
+        assertEq(graceDaysEarnedB, 1, "Should have earned 1 grace day");
+
+        // warp(3 days);
+
+        // meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriodNum);
+        // _performBoost(userB, totemData.totemAddr);
+        // meritAfter = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriodNum);
+        // console.log(meritAfter - meritBefore);
 
         // Step 4: Skip another day without grace days - streak should break
         warp(2 days);
@@ -509,7 +517,7 @@ contract BoostSystemTest is Test {
         prank(userB);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         
-        (, , , uint256 graceDaysEarned, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned, 2, "Should earn grace day at exactly 24-hour boundary");
 
         // Edge Case 2: Premium boost just before 24-hour boundary
@@ -518,7 +526,7 @@ contract BoostSystemTest is Test {
         prank(userB);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         
-        (, , , graceDaysEarned, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , graceDaysEarned, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned, 2, "Should not earn grace day before 24-hour boundary");
 
         // Edge Case 3: Multiple premium boosts in same day
@@ -527,7 +535,7 @@ contract BoostSystemTest is Test {
             boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         }
         
-        (, , , graceDaysEarned, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , graceDaysEarned, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned, 2, "Multiple premium boosts in same day should not earn additional grace days");
     }
 
@@ -682,6 +690,8 @@ contract BoostSystemTest is Test {
         assertEq(reward3, 110, "Day 3 should have 110% of base reward");
     }
 
+
+
     function test_dailyBoost_streakMaxBonus() public {
         // Create a totem and buy tokens
         uint256 totemId = createTotem(userA);
@@ -784,7 +794,7 @@ contract BoostSystemTest is Test {
         _performBoost(userB, totemData.totemAddr);
 
         // Check grace days earned (should be 1 from the 30-day streak)
-        (, , , uint256 graceDaysEarned, uint256 graceDaysWasted, ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned, uint256 graceDaysWasted, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned, 1, "Should earn 1 grace day after 30-day streak");
         assertEq(graceDaysWasted, 1, "Should have used 1 grace day");
 
@@ -823,7 +833,7 @@ contract BoostSystemTest is Test {
         _performBoost(userB, totemData.totemAddr);
 
         // Check grace days earned (should be 2: one at 30 days, one at 60 days)
-        (, , , uint256 graceDaysEarned, uint256 graceDaysWasted, ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned, uint256 graceDaysWasted, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned, 2, "Should earn 2 grace days after 60-day streak");
         assertEq(graceDaysWasted, 1, "Should have used 1 grace day");
 
@@ -832,7 +842,7 @@ contract BoostSystemTest is Test {
         _performBoost(userB, totemData.totemAddr);
 
         // Check grace days wasted
-        (, , , , graceDaysWasted, ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , , graceDaysWasted, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysWasted, 2, "Should have used 2 grace days");
 
         // Skip another day - streak should break now (no more grace days)
@@ -996,6 +1006,9 @@ contract BoostSystemTest is Test {
         vm.deal(userB, 1 ether);
         prank(userB);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        
+        // Execute VRF callback to complete the premium boost
+        mockVRFCoordinator.fulfillRandomWords(1);
 
         // Check that streak continues (should be day 2)
         (uint256 streakDays, uint256 streakMultiplier, ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
@@ -1025,20 +1038,20 @@ contract BoostSystemTest is Test {
         prank(userB);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         
-        (, , , uint256 graceDaysEarned1, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned1, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned1, 1, "Should earn 1 grace day on first premium boost");
 
         // Second premium boost immediately - should not earn another grace day
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         
-        (, , , uint256 graceDaysEarned2, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned2, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned2, 1, "Should not earn additional grace day on same day");
 
         // Wait 24 hours and do another premium boost - should earn another grace day
         warp(1 days);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         
-        (, , , uint256 graceDaysEarned3, , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        (, , , , uint256 graceDaysEarned3, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
         assertEq(graceDaysEarned3, 2, "Should earn grace day after 24 hours");
     }
 
@@ -1464,6 +1477,9 @@ contract BoostSystemTest is Test {
         
         prank(userB);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        
+        // Execute VRF callback to complete the premium boost
+        mockVRFCoordinator.fulfillRandomWords(1);
 
         // Note: Premium boost uses VRF so we can't test exact merit points
         // But we can verify the streak continues
@@ -1516,7 +1532,7 @@ contract BoostSystemTest is Test {
         );
 
         // Check boost data
-        (uint256 lastBoostTimestamp, , , , , ) = boostSystem.getBoostData(
+        (uint256 lastBoostTimestamp, , , , , , , ) = boostSystem.getBoostData(
             userB,
             totemData.totemAddr
         );
@@ -1777,7 +1793,7 @@ contract BoostSystemTest is Test {
         assertEq(reason, 0, "Should have no reason preventing mint");
 
         // Check boost data to verify streak
-        (, , uint256 streakStartPoint, , , ) = boostSystem.getBoostData(
+        (, , , uint256 streakStartPoint, , , , ) = boostSystem.getBoostData(
             userB,
             totemData.totemAddr
         );
@@ -1838,7 +1854,7 @@ contract BoostSystemTest is Test {
         _performBoost(userB, totemData.totemAddr);
 
         // Check boost data - streak should be reset
-        (, , uint256 streakStartPoint, uint256 releasedBadges, , ) = boostSystem
+        (, , , uint256 streakStartPoint, , , uint256 releasedBadges, ) = boostSystem
             .getBoostData(userB, totemData.totemAddr);
         assertEq(
             releasedBadges,
@@ -2176,7 +2192,7 @@ contract BoostSystemTest is Test {
     // Helper function to perform boost with signature (auto-waits for interval)
     function _performBoost(address _user, address _totemAddr) internal {
         // Check if we need to wait for boost interval
-        (uint256 lastBoostTimestamp, , , , , ) = boostSystem.getBoostData(
+        (uint256 lastBoostTimestamp, , , , , , , ) = boostSystem.getBoostData(
             _user,
             _totemAddr
         );
@@ -2212,4 +2228,185 @@ contract BoostSystemTest is Test {
         prank(_user);
         boostSystem.boost(_totemAddr, timestamp, signature);
     }
+
+    function test_PremiumBoostGraceDayComplexScenario() public {
+        // Сценарий: юзер делает премиум буст, проходит 2 часа, после этого он делает еще один премиум буст,
+        // мы проверяем что кол-во мерит увеличилось на правильное кол-во. Также мы проверяем что добавилось 1 грейс день.
+        // Проходит 22 часа, юзер делает еще один премиум буст, мы проверяем что теперь у нас 2 грейс дня.
+        // Проходит час, после этого пользователь успешно делает дейли буст, мы проверяем что стрик уже равен 4 
+        // и пользователь получил 115 мерита.
+
+        // Подготовка: создаем тотем и покупаем токены
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory totemData = factory.getTotemData(totemId);
+
+        prank(userB);
+        uint256 available = distr.getAvailableTokensForPurchase(userB, totemData.totemTokenAddr);
+        paymentToken.approve(address(distr), available);
+        distr.buy(totemData.totemTokenAddr, available);
+        buyAllTotemTokens(totemData.totemTokenAddr);
+
+        uint256 currentPeriod = mm.currentPeriod();
+        (uint256 price, ) = boostSystem.getPremiumBoostConfig();
+        vm.deal(userB, 10 ether);
+
+        // Шаг 1: Первый премиум буст
+        uint256 meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(1);
+        
+        // Проверяем мерит и грейс день
+        assertGe(mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod) - meritBefore, 500, "First premium boost should give at least 500 merit points");
+        (, , , , uint256 graceDays, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        assertEq(graceDays, 1, "Should have 1 grace day after first premium boost");
+        (uint256 streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 1, "Should have 1-day streak after first premium boost");
+
+        // Шаг 2: Проходит 2 часа, делаем второй премиум буст
+        warp(2 hours);
+        meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(2);
+
+        // Проверяем мерит и грейс день (не должен добавиться)
+        assertGe(mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod) - meritBefore, 500, "Second premium boost should give at least 500 merit points (no streak bonus yet)");
+        (, , , , graceDays, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        assertEq(graceDays, 1, "Should still have only 1 grace day (less than 24 hours passed since first grace day)");
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 1, "Should still have 1-day streak (less than 24 hours passed since first boost)");
+
+        // Шаг 3: Проходит 22 часа (итого 24 часа с момента первого буста), делаем третий премиум буст
+        warp(22 hours);
+        meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(3);
+
+        // Проверяем мерит и грейс день (должен добавиться второй, стрик увеличится до 2)
+        assertGe(mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod) - meritBefore, 525, "Third premium boost should give at least 525 merit points with streak bonus");
+        (, , , , graceDays, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        assertEq(graceDays, 2, "Should have 2 grace days after third premium boost (24+ hours passed since first grace day)");
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 2, "Should have 2-day streak after third premium boost (24+ hours passed since first boost)");
+
+        // Шаг 4: Проходит 1 час, делаем дейли буст
+        warp(1 hours);
+        meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod);
+        _performBoost(userB, totemData.totemAddr);
+
+        // Проверяем финальный результат (стрик все еще 2, так как не прошло 24 часа с момента последнего увеличения стрика)
+        assertEq(mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod) - meritBefore, 105, "Daily boost should give 105 merit points with 2-day streak bonus");
+        uint256 multiplier;
+        (streak, multiplier, ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 2, "Should still have 2-day streak after daily boost (less than 24 hours since last streak increment)");
+        assertEq(multiplier, 105, "Should have 105% multiplier (5% bonus)");
+        
+        // Шаг 5: Проходит еще 23 часа (итого 48 часов с момента первого буста), делаем премиум буст
+        warp(23 hours);
+        meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(4);
+
+        // Теперь стрик должен увеличиться до 3 (прошло 48 часов с момента первого буста)
+        assertGe(mm.getTotemMeritPoints(totemData.totemAddr, currentPeriod) - meritBefore, 550, "Premium boost should give at least 550 merit points with 3-day streak bonus");
+        (streak, multiplier, ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 3, "Should have 3-day streak after premium boost (48+ hours passed since first boost)");
+        assertEq(multiplier, 110, "Should have 110% multiplier (10% bonus)");
+        
+        // Финальная проверка грейс дней
+        (, , , , graceDays, , , ) = boostSystem.getBoostData(userB, totemData.totemAddr);
+        assertEq(graceDays, 3, "Should have 3 grace days after premium boost (earned from 3 premium boosts with 24+ hour gaps)");
+    }
+
+    function test_StreakLogicAsDescribed() public {
+        // Test exactly as described:
+        // Premium boost, 2 hours later another premium boost (streak still 1),
+        // 3 hours later another premium boost, 1 hour later daily boost (streak still 1),
+        // 18 hours later daily boost (24 hours passed, streak becomes 2),
+        // premium boost (streak still 2), 23 hours later premium boost (streak still 2),
+        // 1 hour later (48 hours total) premium boost (streak becomes 3)
+
+        // Setup
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory totemData = factory.getTotemData(totemId);
+
+        prank(userB);
+        uint256 available = distr.getAvailableTokensForPurchase(userB, totemData.totemTokenAddr);
+        paymentToken.approve(address(distr), available);
+        distr.buy(totemData.totemTokenAddr, available);
+        buyAllTotemTokens(totemData.totemTokenAddr);
+
+        (uint256 price, ) = boostSystem.getPremiumBoostConfig();
+        vm.deal(userB, 10 ether);
+
+        // 1. First premium boost
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(1);
+        
+        (uint256 streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 1, "After first premium boost streak should be 1");
+
+        // 2. 2 hours later another premium boost, streak still 1
+        warp(2 hours);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(2);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 1, "After second premium boost (2 hours later) streak should still be 1");
+
+        // 3. 3 hours later another premium boost
+        warp(3 hours);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(3);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 1, "After third premium boost (3 hours later) streak should still be 1");
+
+        // 4. 1 hour later daily boost, streak still 1
+        warp(1 hours);
+        _performBoost(userB, totemData.totemAddr);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 1, "After daily boost (1 hour later) streak should still be 1");
+
+        // 5. 18 hours later daily boost (24 hours passed), streak becomes 2
+        warp(18 hours);
+        _performBoost(userB, totemData.totemAddr);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 2, "After daily boost (24 hours since last streak increment) streak should be 2");
+
+        // 6. Premium boost - streak still 2
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(4);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 2, "After premium boost streak should still be 2");
+
+        // 7. 23 hours later premium boost, streak still 2
+        warp(23 hours);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(5);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 2, "After premium boost (23 hours later) streak should still be 2");
+
+        // 8. 1 hour later (48 hours total) premium boost, streak becomes 3
+        warp(1 hours);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(6);
+        
+        (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streak, 3, "After premium boost (48 hours since last streak increment) streak should be 3");
+    }
 }
+    
