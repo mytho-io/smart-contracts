@@ -268,7 +268,8 @@ contract MeritManager is
         if (msg.sender != AddressRegistry(registryAddr).getLayers())
             revert NotAuthorized();
 
-        _creditMerit(_totemAddr, layerRewardPoints);
+        uint256 amountToAdd = layerRewardPoints * getCurrentMythumMultiplier() / 100;
+        _creditMerit(_totemAddr, amountToAdd);
     }
 
     /**
@@ -282,7 +283,7 @@ contract MeritManager is
             revert NotAuthorized();
 
         // Convert donation amount to merit points by dividing by the divisor
-        uint256 meritPoints = _donationAmount / donationMeritDivisor;
+        uint256 meritPoints = _donationAmount * getCurrentMythumMultiplier() / donationMeritDivisor / 100;
         
         if (meritPoints == 0) {
             emit DonationTooSmallForMerit(_totemAddr, _donationAmount, donationMeritDivisor);
@@ -530,11 +531,6 @@ contract MeritManager is
 
         uint256 currentPeriod_ = currentPeriod();
 
-        // Apply Mythum multiplier if in Mythum period
-        if (isMythum()) {
-            _amount = (_amount * mythumMultiplier) / 100;
-        }
-
         // Add merit to the totem
         totemMerit[currentPeriod_][_totemAddr] += _amount;
         totalMeritPoints[currentPeriod_] += _amount;
@@ -570,11 +566,7 @@ contract MeritManager is
         uint256 fee = (_donationAmount * donationFeePercentage) / 10000;
         uint256 creatorAmount = _donationAmount - fee;
         
-        // Calculate merit points based on amount after fee
-        if (isMythum()) {
-            return creatorAmount * mythumMultiplier / 100 / donationMeritDivisor;
-        }
-        return creatorAmount / donationMeritDivisor;
+        return creatorAmount * getCurrentMythumMultiplier() / donationMeritDivisor / 100;
     }
 
     /**
@@ -609,6 +601,11 @@ contract MeritManager is
         // Mythum period lasts 3 days at the end of each period
         uint256 mythumStart = currentPeriodStart + (periodDuration - 3 days);
         return block.timestamp >= mythumStart;
+    }
+
+    function getCurrentMythumMultiplier() public view returns (uint256) {
+        if (isMythum()) return mythumMultiplier;
+        return 100;
     }
 
     /**

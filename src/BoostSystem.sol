@@ -226,21 +226,25 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         uint256 streakPoints = _getStreakPoints(_totemAddr, boostRewardPoints);
 
+        // Apply Mythum multiplier
+        uint256 mythumMultiplier = meritManager.getCurrentMythumMultiplier();
+        uint256 finalReward = (streakPoints * mythumMultiplier) / 100;
+
         // Record user merit contribution
         uint256 currentPeriod = meritManager.currentPeriod();
         userTotemPeriodMerit[msg.sender][_totemAddr][
             currentPeriod
-        ] += streakPoints;
-        userTotalPeriodMerit[msg.sender][currentPeriod] += streakPoints;
+        ] += finalReward;
+        userTotalPeriodMerit[msg.sender][currentPeriod] += finalReward;
 
         // credit merit points
-        meritManager.boostReward(_totemAddr, streakPoints);
+        meritManager.boostReward(_totemAddr, finalReward);
 
         emit TotemBoosted(msg.sender, _totemAddr);
         emit UserMeritCredited(
             msg.sender,
             _totemAddr,
-            streakPoints,
+            finalReward,
             currentPeriod
         );
     }
@@ -516,7 +520,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         // Move last boost timestamp back by specified hours
         uint256 timeToSubtract = _hoursBack * 1 hours;
-        
+
         // Ensure we don't underflow - if timeToSubtract is larger than current timestamp, set to 1
         if (timeToSubtract >= block.timestamp) {
             boostData.lastBoostTimestamp = 1;
@@ -529,7 +533,9 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
             if (timeToSubtract >= block.timestamp) {
                 boostData.lastPremiumBoostTimestamp = 1;
             } else {
-                boostData.lastPremiumBoostTimestamp = block.timestamp - timeToSubtract;
+                boostData.lastPremiumBoostTimestamp =
+                    block.timestamp -
+                    timeToSubtract;
             }
         }
 
@@ -538,27 +544,32 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
             if (timeToSubtract >= block.timestamp) {
                 boostData.lastStreakIncrementTimestamp = 1;
             } else {
-                boostData.lastStreakIncrementTimestamp = block.timestamp - timeToSubtract;
+                boostData.lastStreakIncrementTimestamp =
+                    block.timestamp -
+                    timeToSubtract;
             }
         }
 
         // Recalculate actualStreakDays based on simulated time and grace days logic
         uint256 timeToSubtractSeconds = _hoursBack * 1 hours;
         uint256 allowedGracePeriod = freeBoostCooldown * 2; // 48 hours by default
-        
+
         if (timeToSubtractSeconds >= allowedGracePeriod) {
             // Calculate how many additional days were skipped beyond the grace period
-            uint256 extraTimeSkipped = timeToSubtractSeconds - allowedGracePeriod;
-            uint256 daysSkipped = (extraTimeSkipped + freeBoostCooldown - 1) / freeBoostCooldown; // Round up
-            
+            uint256 extraTimeSkipped = timeToSubtractSeconds -
+                allowedGracePeriod;
+            uint256 daysSkipped = (extraTimeSkipped + freeBoostCooldown - 1) /
+                freeBoostCooldown; // Round up
+
             // For exactly 2 days skip (which equals allowedGracePeriod), we should use 1 grace day
             if (timeToSubtractSeconds == allowedGracePeriod) {
                 daysSkipped = 1;
             }
-            
+
             // Check if user has enough grace days to cover the skipped days
-            uint256 availableGraceDays = boostData.graceDaysEarned - boostData.graceDaysWasted;
-            
+            uint256 availableGraceDays = boostData.graceDaysEarned -
+                boostData.graceDaysWasted;
+
             if (availableGraceDays >= daysSkipped) {
                 // Use grace days to cover skipped days - streak is preserved
                 boostData.graceDaysWasted += daysSkipped;
@@ -909,11 +920,15 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         uint256 baseReward = _calculateBaseReward(_randomWords[0]);
 
         // Apply streak points calculation consistently with free boost
-        uint256 finalReward = _getStreakPointsForUser(
+        uint256 streakReward = _getStreakPointsForUser(
             pendingBoost.user,
             pendingBoost.totemAddr,
             baseReward
         );
+
+        // Apply Mythum multiplier
+        uint256 mythumMultiplier = meritManager.getCurrentMythumMultiplier();
+        uint256 finalReward = (streakReward * mythumMultiplier) / 100;
 
         // Record user merit contribution
         uint256 currentPeriod = meritManager.currentPeriod();
@@ -932,7 +947,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
             pendingBoost.user,
             pendingBoost.totemAddr,
             baseReward,
-            finalReward - baseReward, // Streak bonus
+            finalReward - streakReward, // Mythum bonus
             finalReward
         );
         emit UserMeritCredited(
@@ -1135,10 +1150,10 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
      * @notice Calculates expected rewards for both boost types
      * @param _user User address
      * @param _totemAddr Totem address
-     * @return freeBoostReward Expected free boost reward
-     * @return premiumBoostMinReward Minimum premium boost reward (500 points * multiplier)
-     * @return premiumBoostMaxReward Maximum premium boost reward (3000 points * multiplier)
-     * @return premiumBoostExpectedReward Expected premium boost reward (weighted average * multiplier)
+     * @return freeBoostReward Expected free boost reward (with streak and Mythum multipliers)
+     * @return premiumBoostMinReward Minimum premium boost reward (500 points * streak * Mythum multipliers)
+     * @return premiumBoostMaxReward Maximum premium boost reward (3000 points * streak * Mythum multipliers)
+     * @return premiumBoostExpectedReward Expected premium boost reward (weighted average * streak * Mythum multipliers)
      */
     function getExpectedRewards(
         address _user,
@@ -1213,15 +1228,22 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
 
         uint256 multiplier = 100 + (streak - 1) * 5;
 
-        freeBoostReward = (boostRewardPoints * multiplier) / 100;
+        // Get Mythum multiplier
+        uint256 mythumMultiplier = meritManager.getCurrentMythumMultiplier();
+
+        freeBoostReward =
+            (boostRewardPoints * multiplier * mythumMultiplier) /
+            10000;
 
         // Premium boost calculations
-        premiumBoostMinReward = (500 * multiplier) / 100; // Min: 500 points
-        premiumBoostMaxReward = (3000 * multiplier) / 100; // Max: 3000 points
+        premiumBoostMinReward = (500 * multiplier * mythumMultiplier) / 10000; // Min: 500 points
+        premiumBoostMaxReward = (3000 * multiplier * mythumMultiplier) / 10000; // Max: 3000 points
 
         // Expected value: 500*0.5 + 700*0.25 + 1000*0.15 + 2000*0.07 + 3000*0.03 = 805 points
         uint256 expectedBase = 8050; // 805 * 10 for precision
-        premiumBoostExpectedReward = (expectedBase * multiplier) / 1000; // Divide by 1000 (100 for multiplier, 10 for precision)
+        premiumBoostExpectedReward =
+            (expectedBase * multiplier * mythumMultiplier) /
+            100000; // Divide by 100000 (100 for multiplier, 10 for precision, 100 for mythum)
     }
 
     /**
