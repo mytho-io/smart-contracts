@@ -238,7 +238,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         userTotalPeriodMerit[msg.sender][currentPeriod] += finalReward;
 
         // credit merit points
-        meritManager.boostReward(_totemAddr, finalReward);
+        meritManager.boostReward(_totemAddr, finalReward, msg.sender);
 
         emit TotemBoosted(msg.sender, _totemAddr);
         emit UserMeritCredited(
@@ -938,7 +938,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable {
         userTotalPeriodMerit[pendingBoost.user][currentPeriod] += finalReward;
 
         // Credit merit points
-        meritManager.boostReward(pendingBoost.totemAddr, finalReward);
+        meritManager.boostReward(pendingBoost.totemAddr, finalReward, pendingBoost.user);
 
         // Clean up
         delete pendingBoosts[_requestId];

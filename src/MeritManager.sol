@@ -66,7 +66,7 @@ contract MeritManager is
     // Events
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
-    event MeritCredited(address indexed totem, uint256 amount, uint256 period);
+    event MeritCredited(address indexed totem, uint256 amount, uint256 period, address indexed who, string indexed source);
     event TotemBoosted(address indexed totem, address indexed booster, uint256 amount, uint256 period); // prettier-ignore
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
@@ -74,6 +74,7 @@ contract MeritManager is
     event LayerRewardUpdated(uint256 amount); // prettier-ignore
     event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
     event DonationTooSmallForMerit(address indexed totem, uint256 donationAmount, uint256 minimumRequired);
+    event DonationRewarded(address indexed who, address indexed totemAddr, uint256 meritPoints);
 
     // Custom errors
     error TotemNotRegistered();
@@ -240,11 +241,11 @@ contract MeritManager is
      * @dev Only callable by the BoostSystem contract
      * @param _totemAddr Address of the Totem to credit merit to
      */
-    function boostReward(address _totemAddr, uint256 _amountToAdd) external {
+    function boostReward(address _totemAddr, uint256 _amountToAdd, address _who) external {
         if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
             revert NotAuthorized();
 
-        _creditMerit(_totemAddr, _amountToAdd);
+        _creditMerit(_totemAddr, _amountToAdd, _who, "boostReward");
     }
 
     /**
@@ -252,11 +253,11 @@ contract MeritManager is
      * @dev Only callable by the BoostSystem contract
      * @param _totemAddr Address of the Totem to credit merit to
      */
-    function premiumBoostReward(address _totemAddr, uint256 _amountToAdd) external {
+    function premiumBoostReward(address _totemAddr, uint256 _amountToAdd, address _who) external {
         if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
             revert NotAuthorized();
             
-        _creditMerit(_totemAddr, _amountToAdd);
+        _creditMerit(_totemAddr, _amountToAdd, _who, "premiumBoostReward");
     }
 
     /**
@@ -264,12 +265,12 @@ contract MeritManager is
      * @dev Only callable by the Layers contract
      * @param _totemAddr Address of the Totem to credit merit to
      */
-    function layerReward(address _totemAddr) external {
+    function layerReward(address _totemAddr, address _who) external {
         if (msg.sender != AddressRegistry(registryAddr).getLayers())
             revert NotAuthorized();
 
         uint256 amountToAdd = layerRewardPoints * getCurrentMythumMultiplier() / 100;
-        _creditMerit(_totemAddr, amountToAdd);
+        _creditMerit(_totemAddr, amountToAdd, _who, "layerReward");
     }
 
     /**
@@ -290,7 +291,9 @@ contract MeritManager is
             return;
         }
 
-        _creditMerit(_totemAddr, meritPoints);
+        _creditMerit(_totemAddr, meritPoints, msg.sender, "donationReward");
+
+        emit DonationRewarded(msg.sender, _totemAddr, meritPoints);
     }
 
     // ADMIN FUNCTIONS
@@ -311,7 +314,7 @@ contract MeritManager is
         address _totemAddr,
         uint256 _amount
     ) external onlyRole(MANAGER) {
-        _creditMerit(_totemAddr, _amount);
+        _creditMerit(_totemAddr, _amount, msg.sender, "creditMerit");
     }
 
     /**
@@ -524,7 +527,12 @@ contract MeritManager is
      * @param _totemAddr Address of the totem to credit
      * @param _amount Amount of merit points to credit
      */
-    function _creditMerit(address _totemAddr, uint256 _amount) private {
+    function _creditMerit(
+        address _totemAddr, 
+        uint256 _amount, 
+        address _who, 
+        string memory _source
+    ) private {
         if (_amount == 0) revert ZeroAmount();
         if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
         if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
@@ -535,7 +543,7 @@ contract MeritManager is
         totemMerit[currentPeriod_][_totemAddr] += _amount;
         totalMeritPoints[currentPeriod_] += _amount;
 
-        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
+        emit MeritCredited(_totemAddr, _amount, currentPeriod_, _who, _source);
     }
 
     // VIEW FUNCTIONS
@@ -565,7 +573,7 @@ contract MeritManager is
         // Calculate fee and amount after fee (same logic as in Layers.donateToLayer)
         uint256 fee = (_donationAmount * donationFeePercentage) / 10000;
         uint256 creatorAmount = _donationAmount - fee;
-        
+
         return creatorAmount * getCurrentMythumMultiplier() / donationMeritDivisor / 100;
     }
 

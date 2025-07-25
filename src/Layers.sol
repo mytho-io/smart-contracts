@@ -223,7 +223,7 @@ contract Layers is
 
             // Award Merit point for created layer only if totem is registered in Merit Manager
             if (meritManager.isRegisteredTotem(_totemAddr)) {
-                meritManager.layerReward(_totemAddr);
+                meritManager.layerReward(_totemAddr, msg.sender);
             }
         }
 
@@ -282,7 +282,7 @@ contract Layers is
 
             // Award Merit point for approved layer only if totem is registered in Merit Manager
             if (meritManager.isRegisteredTotem(pendingLayer.totemAddr)) {
-                meritManager.layerReward(pendingLayer.totemAddr);
+                meritManager.layerReward(pendingLayer.totemAddr, layer.creator);
             }
 
             emit LayerApproved(_pendingId, newLayerId);
