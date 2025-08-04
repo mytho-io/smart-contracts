@@ -61,7 +61,7 @@ contract TotemTokenDistributor is
     // Constants
     uint256 private constant PRECISION = 10000;
     uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
-    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours; // Maximum age of price feed data before it's considered stale (1 hour)
+    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 36 hours; // Maximum age of price feed data before it's considered stale (36 hours)
 
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
