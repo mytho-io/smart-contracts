@@ -56,8 +56,8 @@ contract DoTest is Test {
     }
 
     function test_do() public {
-        // address user = 0x7ECD92b9835E0096880bF6bA778d9eA40d1338B5;
-        // address totemAddr = address(0xda54c191ea8e5e2C1A774eb6f607b90d77FCeC87);
+        // address user = 0x0B7fdc8b8550615f3b6f7F407d3532EA2EC7a82C;
+        // address totemAddr = address(0x67940cdD27c51C5721888feDBCC1ABA0cFA6a588);
 
         // prank(user);
 
@@ -69,10 +69,10 @@ contract DoTest is Test {
         // );
 
         // uint256 currentPeriod = mm.currentPeriod();
-        // uint256 meritPointsBefore = mm.getTotemMeritPoints(totemAddr, currentPeriod);
-        // console.log(meritPointsBefore);
+        // // uint256 meritPointsBefore = mm.getTotemMeritPoints(totemAddr, currentPeriod);
+        // // console.log(meritPointsBefore);
         // bs.boost(totemAddr, timestamp, signature);
-        // console.log(mm.getTotemMeritPoints(totemAddr, currentPeriod));
+        // // console.log(mm.getTotemMeritPoints(totemAddr, currentPeriod));
     }
 
     /**
