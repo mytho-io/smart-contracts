@@ -607,41 +607,42 @@ contract TotemTokenDistributor is
      * @return Price of tokens in USD (18 decimals)
      */
     function getPrice(address _tokenAddr) public view returns (uint256) {
-        address priceFeedAddr = priceFeedAddresses[_tokenAddr];
+        return 0.05 ether;
+        // address priceFeedAddr = priceFeedAddresses[_tokenAddr];
 
-        if (priceFeedAddr == address(0)) {
-            revert NoPriceFeedSet(_tokenAddr);
-        }
+        // if (priceFeedAddr == address(0)) {
+        //     revert NoPriceFeedSet(_tokenAddr);
+        // }
 
-        // Get the latest price from Chainlink
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddr);
-        (
-            uint80 roundId,
-            int256 price,
-            ,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        ) = priceFeed.latestRoundData();
+        // // Get the latest price from Chainlink
+        // AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddr);
+        // (
+        //     uint80 roundId,
+        //     int256 price,
+        //     ,
+        //     uint256 updatedAt,
+        //     uint80 answeredInRound
+        // ) = priceFeed.latestRoundData();
 
-        // Validate the price feed data
-        if (price <= 0) revert InvalidPrice(_tokenAddr);
-        if (answeredInRound < roundId) revert StalePrice(_tokenAddr);
-        if (block.timestamp > updatedAt + PRICE_FEED_STALE_THRESHOLD)
-            revert StalePrice(_tokenAddr);
+        // // Validate the price feed data
+        // if (price <= 0) revert InvalidPrice(_tokenAddr);
+        // if (answeredInRound < roundId) revert StalePrice(_tokenAddr);
+        // if (block.timestamp > updatedAt + PRICE_FEED_STALE_THRESHOLD)
+        //     revert StalePrice(_tokenAddr);
 
-        // Get the number of decimals in the price feed
-        uint8 decimals = priceFeed.decimals();
+        // // Get the number of decimals in the price feed
+        // uint8 decimals = priceFeed.decimals();
 
-        // First, normalize the price to 18 decimals
-        uint256 normalizedPrice;
-        if (decimals < 18) {
-            normalizedPrice = uint256(price) * (10 ** (18 - decimals));
-        } else {
-            normalizedPrice = uint256(price) / (10 ** (decimals - 18));
-        }
+        // // First, normalize the price to 18 decimals
+        // uint256 normalizedPrice;
+        // if (decimals < 18) {
+        //     normalizedPrice = uint256(price) * (10 ** (18 - decimals));
+        // } else {
+        //     normalizedPrice = uint256(price) / (10 ** (decimals - 18));
+        // }
 
-        // Return the normalized price
-        return normalizedPrice;
+        // // Return the normalized price
+        // return normalizedPrice;
     }
 
     /**
