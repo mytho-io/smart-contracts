@@ -61,7 +61,7 @@ contract TotemTokenDistributor is
     // Constants
     uint256 private constant PRECISION = 10000;
     uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
-    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 1 hours; // Maximum age of price feed data before it's considered stale (1 hour)
+    uint256 public constant PRICE_FEED_STALE_THRESHOLD = 36 hours; // Maximum age of price feed data before it's considered stale (36 hours)
 
     bytes32 private constant MANAGER = keccak256("MANAGER");
 
@@ -581,7 +581,7 @@ contract TotemTokenDistributor is
         uint256 _totemsAmount
     ) public view returns (uint256) {
         uint256 amount = (_totemsAmount * oneTotemPriceInUsd) /
-            (getPrice(_tokenAddr) * 1e10); // Convert 8 decimals to 18 decimals
+            getPrice(_tokenAddr);
         return amount == 0 ? 1 : amount;
     }
 
@@ -595,7 +595,7 @@ contract TotemTokenDistributor is
         address _tokenAddr,
         uint256 _paymentTokenAmount
     ) external view returns (uint256) {
-        uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr) * 1e10) /
+        uint256 amount = (_paymentTokenAmount * getPrice(_tokenAddr)) /
             oneTotemPriceInUsd;
         return amount == 0 ? 1 : amount;
     }
@@ -616,18 +616,32 @@ contract TotemTokenDistributor is
         // Get the latest price from Chainlink
         AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeedAddr);
         (
-            ,
+            uint80 roundId,
             int256 price,
             ,
-            ,
-            
+            uint256 updatedAt,
+            uint80 answeredInRound
         ) = priceFeed.latestRoundData();
 
         // Validate the price feed data
         if (price <= 0) revert InvalidPrice(_tokenAddr);
+        if (answeredInRound < roundId) revert StalePrice(_tokenAddr);
+        if (block.timestamp > updatedAt + PRICE_FEED_STALE_THRESHOLD)
+            revert StalePrice(_tokenAddr);
 
-        // Return the raw price from Chainlink (8 decimals)
-        return uint256(price);
+        // Get the number of decimals in the price feed
+        uint8 decimals = priceFeed.decimals();
+
+        // First, normalize the price to 18 decimals
+        uint256 normalizedPrice;
+        if (decimals < 18) {
+            normalizedPrice = uint256(price) * (10 ** (18 - decimals));
+        } else {
+            normalizedPrice = uint256(price) / (10 ** (decimals - 18));
+        }
+
+        // Return the normalized price
+        return normalizedPrice;
     }
 
     /**

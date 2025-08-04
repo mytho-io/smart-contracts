@@ -12,6 +12,8 @@ docs/
 # Dotenv file
 .env
 
+.kiro
+
 flattened/
 
 promptDesc.txt
