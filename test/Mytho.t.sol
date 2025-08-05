@@ -111,7 +111,7 @@ contract MythoTest is Test {
 
     function test_Initialization() public {
         // Check token name and symbol
-        assertEq(mytho.name(), "MYTHO Government Token");
+        assertEq(mytho.name(), "MYTHO Governance Token");
         assertEq(mytho.symbol(), "MYTHO");
         
         // Check total supply (only merit tokens minted initially)
