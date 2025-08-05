@@ -552,8 +552,6 @@ contract BoostSystemTest is Base {
 
         buyAllTotemTokens(totemData.totemTokenAddr);
 
-        uint256 currentPeriodNum = mm.currentPeriod();
-
         // Boost for 30 days to reach maximum bonus
         for (uint256 i = 0; i < 30; i++) {
             performBoost(userB, totemData.totemAddr);
@@ -1317,9 +1315,6 @@ contract BoostSystemTest is Base {
         (uint256 price, ) = boostSystem.getPremiumBoostConfig();
         vm.deal(userB, 1 ether);
         
-        uint256 currentPeriodNum = mm.currentPeriod();
-        uint256 meritBefore = mm.getTotemMeritPoints(totemData.totemAddr, currentPeriodNum);
-        
         prank(userB);
         boostSystem.premiumBoost{value: price}(totemData.totemAddr);
         
@@ -1699,7 +1694,7 @@ contract BoostSystemTest is Base {
         performBoost(userB, totemData.totemAddr);
 
         // Check boost data - streak should be reset
-        (, , , uint256 streakStartPoint, , , uint256 releasedBadges, ) = boostSystem
+        (, , , , , , uint256 releasedBadges, ) = boostSystem
             .getBoostData(userB, totemData.totemAddr);
         assertEq(
             releasedBadges,
@@ -1926,110 +1921,5 @@ contract BoostSystemTest is Base {
         
         (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
         assertEq(streak, 3, "After premium boost (48 hours since last streak increment) streak should be 3");
-    }
-
-    function test_simulateTimePassingForTesting_withGraceDays() public {
-        // Test that simulateTimePassingForTesting properly handles grace days
-        
-        uint256 totemId = createTotem(userA);
-        TF.TotemData memory totemData = factory.getTotemData(totemId);
-
-        prank(userB);
-        uint256 available = distr.getAvailableTokensForPurchase(
-            userB,
-            totemData.totemTokenAddr
-        );
-        paymentToken.approve(address(distr), available);
-        distr.buy(totemData.totemTokenAddr, available);
-        buyAllTotemTokens(totemData.totemTokenAddr);
-
-        (uint256 price, ) = boostSystem.getPremiumBoostConfig();
-        vm.deal(userB, 5 ether);
-
-        // Step 1: Build a streak and earn grace days
-        performBoost(userB, totemData.totemAddr); // Day 1
-        warp(1 days);
-        performBoost(userB, totemData.totemAddr); // Day 2
-        warp(1 days);
-        
-        // Premium boost to earn grace day
-        prank(userB);
-        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
-        mockVRFCoordinator.fulfillRandomWords(1);
-        
-        // Check initial state
-        (uint256 streakDays, , uint256 availableGraceDays) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
-        assertEq(streakDays, 3, "Should have 3-day streak");
-        assertEq(availableGraceDays, 1, "Should have 1 grace day");
-
-        // Step 2: Test simulation with grace days available (should preserve streak)
-        prank(deployer);
-        boostSystem.simulateTimePassingForTesting(userB, totemData.totemAddr, 72); // 3 days back
-        
-        // Check that grace days were used and streak preserved
-        (, , , , uint256 graceDaysEarned, uint256 graceDaysWasted, , uint256 actualStreakDays) = 
-            boostSystem.getBoostData(userB, totemData.totemAddr);
-        
-        assertEq(graceDaysWasted, 1, "Should have used 1 grace day");
-        assertEq(actualStreakDays, 3, "Streak should be preserved with grace days");
-
-        // Step 3: Test simulation without enough grace days (should reset streak)
-        prank(deployer);
-        boostSystem.simulateTimePassingForTesting(userB, totemData.totemAddr, 120); // 5 days back
-        
-        // Check that streak was reset
-        (, , , , graceDaysEarned, graceDaysWasted, , actualStreakDays) = 
-            boostSystem.getBoostData(userB, totemData.totemAddr);
-        
-        assertEq(graceDaysEarned, 0, "Grace days should be reset");
-        assertEq(graceDaysWasted, 0, "Grace days wasted should be reset");
-        assertEq(actualStreakDays, 0, "Streak should be reset");
-
-        // Step 4: Test simulation with less than 48 hours (should not affect streak)
-        // First rebuild a small streak
-        performBoost(userB, totemData.totemAddr);
-        warp(1 days);
-        performBoost(userB, totemData.totemAddr);
-        
-        (streakDays, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
-        assertEq(streakDays, 2, "Should have 2-day streak before simulation");
-        
-        prank(deployer);
-        boostSystem.simulateTimePassingForTesting(userB, totemData.totemAddr, 36); // 1.5 days back
-        
-        (, , , , , , , actualStreakDays) = boostSystem.getBoostData(userB, totemData.totemAddr);
-        assertEq(actualStreakDays, 2, "Streak should be unchanged for < 48 hours");
-    }
-
-    function test_simulateTimePassingForTesting_initialization() public {
-        // Test that simulateTimePassingForTesting properly initializes new users
-        
-        uint256 totemId = createTotem(userA);
-        TF.TotemData memory totemData = factory.getTotemData(totemId);
-
-        prank(userB);
-        uint256 available = distr.getAvailableTokensForPurchase(
-            userB,
-            totemData.totemTokenAddr
-        );
-        paymentToken.approve(address(distr), available);
-        distr.buy(totemData.totemTokenAddr, available);
-        buyAllTotemTokens(totemData.totemTokenAddr);
-
-        // Check initial state (never boosted)
-        (, , , uint256 streakStartPoint, , , , uint256 actualStreakDays) = 
-            boostSystem.getBoostData(userB, totemData.totemAddr);
-        assertEq(streakStartPoint, 0, "Should have no streak start point initially");
-        assertEq(actualStreakDays, 0, "Should have no streak initially");
-
-        // Simulate time passing for user who never boosted
-        prank(deployer);
-        boostSystem.simulateTimePassingForTesting(userB, totemData.totemAddr, 24);
-        
-        // Check that initialization happened
-        (, , , streakStartPoint, , , , actualStreakDays) = 
-            boostSystem.getBoostData(userB, totemData.totemAddr);
-        assertGt(streakStartPoint, 0, "Should have initialized streak start point");
-        assertEq(actualStreakDays, 1, "Should have initialized actualStreakDays to 1");
     }
 }

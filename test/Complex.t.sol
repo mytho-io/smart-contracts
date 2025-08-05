@@ -691,7 +691,6 @@ contract ComplexTest is Base {
 
         // Get initial balances
         uint256 initialMythoBalance = mytho.balanceOf(data.totemAddr);
-        uint256 initialPaymentBalance = paymentToken.balanceOf(data.totemAddr);
 
         // Transfer some totem tokens to multiple users
 

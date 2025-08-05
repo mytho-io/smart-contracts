@@ -20,11 +20,12 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant MYTHO_TOKEN = "MYTHO_TOKEN";
     bytes32 private constant MYTHO_TREASURY = "MYTHO_TREASURY";
     bytes32 private constant TOTEM_FACTORY = "TOTEM_FACTORY";
-    bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR =
-        "TOTEM_TOKEN_DISTRIBUTOR";
+    bytes32 private constant TOTEM_TOKEN_DISTRIBUTOR = "TOTEM_TOKEN_DISTRIBUTOR";
     bytes32 private constant TOKEN_HOLDERS_ORACLE = "TOKEN_HOLDERS_ORACLE";
-    bytes32 private constant SHARD_TOKEN = "SHARD_TOKEN";
-    bytes32 private constant LAYERS = "LAYERS";
+    bytes32 private constant SHARDS = "SHARDS";
+    bytes32 private constant POSTS = "POSTS";
+    bytes32 private constant BOOST_SYSTEM = "BOOST_SYSTEM";
+    bytes32 private constant BADGE_NFT = "BADGE_NFT";
     bytes32 private constant MULTISIG_WALLET = "MULTISIG_WALLET";
 
     // Events
@@ -131,15 +132,15 @@ contract AddressRegistry is AccessControlUpgradeable {
      * @return Address of the ShardToken contract
      */
     function getShardToken() external view returns (address) {
-        return getAddress(SHARD_TOKEN);
+        return getAddress(SHARDS);
     }
 
     /**
-     * @notice Gets the address of the LayerNFT contract
-     * @return Address of the LayerNFT contract
+     * @notice Gets the address of the PostNFT contract
+     * @return Address of the PostNFT contract
      */
-    function getLayers() external view returns (address) {
-        return getAddress(LAYERS);
+    function getPosts() external view returns (address) {
+        return getAddress(POSTS);
     }
 
     /**
@@ -150,6 +151,22 @@ contract AddressRegistry is AccessControlUpgradeable {
         return getAddress(TOKEN_HOLDERS_ORACLE);
     }
 
+    /**
+     * @notice Gets the address of the BoostSystem contract
+     * @return Address of the BoostSystem contract
+     */
+    function getBoostSystem() external view returns (address) {
+        return getAddress(BOOST_SYSTEM);
+    }
+
+    /**
+     * @notice Gets the address of the BadgeNFT contract
+     * @return Address of the BadgeNFT contract
+     */
+    function getBadgeNFT() external view returns (address) {
+        return getAddress(BADGE_NFT);
+    }
+    
     /**
      * @notice Gets the address of the MultisigWallet contract
      * @return Address of the MultisigWallet contract

@@ -32,7 +32,7 @@ import {Totem} from "../src/Totem.sol";
 import {MYTHO} from "../src/MYTHO.sol";
 import {Treasury} from "../src/Treasury.sol";
 import {AddressRegistry} from "../src/AddressRegistry.sol";
-import {Layers as L} from "../src/Layers.sol";
+import {Posts as P} from "../src/Posts.sol";
 import {Shards} from "../src/Shards.sol";
 import {BoostSystem} from "../src/BoostSystem.sol";
 import {BadgeNFT} from "../src/BadgeNFT.sol";
@@ -76,9 +76,9 @@ contract Base is Test {
     MockToken paymentToken;
     MockToken astrToken;
 
-    TransparentUpgradeableProxy layerProxy;
-    L layersImpl;
-    L layers;
+    TransparentUpgradeableProxy postsProxy;
+    P postsImpl;
+    P posts;
 
     TransparentUpgradeableProxy shardProxy;
     Shards shardsImpl;
@@ -91,7 +91,7 @@ contract Base is Test {
 
     // BadgeNFT
     BadgeNFT badgeNFT;
-    
+
     // MockVRFCoordinator
     MockVRFCoordinator mockVRFCoordinator;
 
@@ -134,26 +134,26 @@ contract Base is Test {
 
     // HELPERS
 
-    function createLayer(
+    function createPost(
         address _creator,
         uint256 _totemId
     ) internal returns (uint256) {
         TF.TotemData memory data = factory.getTotemData(_totemId);
         prank(_creator);
         return
-            layers.createLayer(
+            posts.createPost(
                 data.totemAddr,
                 abi.encodePacked(keccak256("Test"))
             );
     }
 
-    function createLayerWithTotem(
+    function createPostWithTotem(
         address _creator,
         address _totemAddr
     ) internal returns (uint256) {
         prank(_creator);
         return
-            layers.createLayer(_totemAddr, abi.encodePacked(keccak256("Test")));
+            posts.createPost(_totemAddr, abi.encodePacked(keccak256("Test")));
     }
 
     function createTotem(address _creator) internal returns (uint256) {
@@ -169,7 +169,9 @@ contract Base is Test {
         return factory.getLastId() - 1;
     }
 
-    function createTotemWithAddrInReturn(address _creator) internal returns (address) {
+    function createTotemWithAddrInReturn(
+        address _creator
+    ) internal returns (address) {
         prank(_creator);
         astrToken.approve(address(factory), factory.getCreationFee());
         factory.createTotem("dataHash", "TotemToken", "TT", new address[](0));
@@ -191,16 +193,23 @@ contract Base is Test {
         astrToken.approve(address(factory), factory.getCreationFee());
         address[] memory nftAddresses = new address[](1);
         nftAddresses[0] = address(nftToken);
+
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(nftToken)),
+            abi.encodeWithSelector(
+                TokenHoldersOracle.requestNFTCount.selector,
+                address(nftToken)
+            ),
             abi.encode(0)
         );
+
         factory.createTotemWithExistingToken(
             abi.encodePacked(keccak256("NFT Test")),
             address(nftToken),
             new address[](0)
         );
+
+        return factory.getLastId() - 1;
     }
 
     function buyAllTotemTokens(address _totemTokenAddr) internal {
@@ -353,10 +362,7 @@ contract Base is Test {
             ""
         );
         mytho = MYTHO(address(mythoProxy));
-        mytho.initialize(
-            address(mm),
-            address(registry)
-        );
+        mytho.initialize(address(mm), address(registry));
 
         address[4] memory vestingAddresses = [
             mytho.meritVestingYear1(),
@@ -425,17 +431,17 @@ contract Base is Test {
             address(holdersOracle)
         );
 
-        // Layers
-        layersImpl = new L();
-        layerProxy = new TransparentUpgradeableProxy(
-            address(layersImpl),
+        // Posts
+        postsImpl = new P();
+        postsProxy = new TransparentUpgradeableProxy(
+            address(postsImpl),
             deployer,
             ""
         );
-        layers = L(address(layerProxy));
-        layers.initialize(address(registry));
+        posts = P(address(postsProxy));
+        posts.initialize(address(registry));
 
-        registry.setAddress(bytes32("LAYERS"), address(layers));
+        registry.setAddress(bytes32("POSTS"), address(posts));
 
         // Shards
         shardsImpl = new Shards();
@@ -449,7 +455,7 @@ contract Base is Test {
 
         registry.setAddress(bytes32("SHARDS"), address(shards));
 
-        layers.setShardToken();
+        posts.setShardToken();
 
         // BadgeNFT
         badgeNFT = new BadgeNFT();
@@ -466,7 +472,7 @@ contract Base is Test {
 
         // Deploy mock VRF coordinator
         mockVRFCoordinator = new MockVRFCoordinator();
-        
+
         // Initialize BoostSystem with mock VRF coordinator
         boostSystem.initialize(
             address(registry),
@@ -489,4 +495,3 @@ contract Base is Test {
         distr.setPriceFeed(address(paymentToken), address(mockV3Aggregator));
     }
 }
-    
