@@ -82,7 +82,7 @@ contract Posts is
         address creator; // Post creator
         bytes metadataHash; // Hash of metadata (keccak256)
         uint32 createdAt; // Creation timestamp
-        uint224 totalBoostedTokens; // Total tokens boosted
+        uint256 totalBoostedTokens; // Total tokens boosted
     }
 
     // Constants - Roles
@@ -123,7 +123,6 @@ contract Posts is
     error DonationFailed();
     error FeeTooLow();
     error InvalidDuration();
-    error MaxBoostExceeded();
     error PostAlreadyVerified();
     error StaleOracleData();
     error MaxNFTBoostsExceeded();
@@ -323,7 +322,7 @@ contract Posts is
      */
     function boostPost(
         uint256 _postId,
-        uint224 _tokenAmountOrId
+        uint256 _tokenAmountOrId
     ) external whenNotPaused nonReentrant {
         Post storage post = posts[_postId];
         if (post.creator == address(0)) revert PostNotFound();
@@ -354,9 +353,6 @@ contract Posts is
 
             // Transfer NFT to this contract
             nftToken.safeTransferFrom(msg.sender, address(this), tokenId);
-
-            // Check for overflow before updating
-            if (post.totalBoostedTokens >= type(uint224).max) revert MaxBoostExceeded();
             
             // Update boost data
             boosts[_postId][msg.sender] += 1; // Each NFT counts as 1 boost
