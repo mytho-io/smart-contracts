@@ -311,9 +311,7 @@ The following contracts are currently undergoing security audit and represent th
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16+ recommended)
 - [Foundry](https://book.getfoundry.sh/) (Forge for testing and deployment)
-- [Git](https://git-scm.com/)
 
 ### Installation
 
@@ -352,16 +350,9 @@ forge test --match-contract MythoTest
 
 ### Deployment
 
-The project includes several deployment scripts in the `script/` directory:
-
-- `Deploy.s.sol`: Deploys the core contracts
-- `MythoCcipSetup.s.sol`: Sets up cross-chain functionality with CCIP
-- `CrosschainTransfer.s.sol`: Script for testing cross-chain transfers
-- Various upgrade scripts for upgrading individual contracts
-
 To deploy the contracts:
 ```bash
-forge script script/Deploy.s.sol --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast
+forge script UpdateSoneium --rpc-url <RPC_URL> --private-key <PRIVATE_KEY> --broadcast
 ```
 
 ### Environment Variables
@@ -369,8 +360,7 @@ forge script script/Deploy.s.sol --rpc-url <RPC_URL> --private-key <PRIVATE_KEY>
 Create a `.env` file with the following variables:
 ```bash
 PRIVATE_KEY=your_deployment_private_key
-RPC_URL=your_rpc_endpoint
-ETHERSCAN_API_KEY=your_etherscan_api_key
+SONEIUM_RPC_URL=your_rpc_endpoint
 ```
 
 ## Cross-Chain Configuration
@@ -425,16 +415,6 @@ For detailed steps, refer to the `MythoCcipSetup.s.sol` script.
 - `pause()` / `unpause()`: Emergency pause functionality (MANAGER role)
 - `balanceOf(user)`: View user's SHARD token balance
 
-### Role Management
-```solidity
-// Grant roles (DEFAULT_ADMIN_ROLE required)
-mytho.grantRole(MANAGER, managerAddress);
-mytho.grantRole(MULTISIG, multisigAddress);
-
-// Check roles
-bool isManager = mytho.hasRole(MANAGER, address);
-```
-
 ## License
 
 This project is licensed under the Business Source License 1.1 (BUSL-1.1) - see the [LICENSE](LICENSE) file for details.
@@ -448,13 +428,3 @@ This project is licensed under the Business Source License 1.1 (BUSL-1.1) - see 
 - **Additional Use Grant**: None
 
 The BUSL-1.1 license allows for non-production use of the code until the Change Date (May 1, 2027), after which the code will be available under the MIT License. For production use before the Change Date, please contact igporoshin@gmail.com to obtain a commercial license.
-
-## Support
-
-For technical support, questions, or commercial licensing inquiries, please contact:
-- Email: igporoshin@gmail.com
-- GitHub: [Create an issue](https://github.com/mytho-io/smart-contracts/issues)
-
-## Security
-
-If you discover a security vulnerability, please send an email to igporoshin@gmail.com. All security vulnerabilities will be promptly addressed.
