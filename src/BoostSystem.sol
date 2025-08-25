@@ -1002,10 +1002,10 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
     }
 
     /**
-     * @notice Gets current streak information for a user and totem
+     * @notice Gets current streak information for a user and totem with real-time calculation
      * @param _user User address
      * @param _totemAddr Totem address
-     * @return streakDays Current streak in days
+     * @return streakDays Current streak in days (real-time calculated)
      * @return streakMultiplier Current streak multiplier (100 = 1.00x, 245 = 2.45x)
      * @return availableGraceDays Available grace days (earned - wasted)
      */
@@ -1027,10 +1027,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
             return (0, 100, 0);
         }
 
-        streakDays = data.actualStreakDays;
+        // Calculate actual current streak based on time and grace days
+        streakDays = _calculateCurrentStreak(_user, _totemAddr);
         if (streakDays > 30) streakDays = 30;
 
-        streakMultiplier = 100 + (streakDays - 1) * 5;
+        streakMultiplier = 100 + (streakDays > 0 ? (streakDays - 1) * 5 : 0);
         availableGraceDays = data.graceDaysEarned - data.graceDaysWasted;
     }
 
@@ -1412,5 +1413,54 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         if (roll < 90) return 1000; // 75-89: 15% chance
         if (roll < 97) return 2000; // 90-96: 7% chance
         return 3000; // 97-99: 3% chance
+    }
+
+    /**
+     * @notice Calculates the actual current streak based on time and grace days
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @return Current streak in days (0 if broken, actual streak if preserved)
+     * @dev Simulates the logic from _updateStreakStartPointForUser without state changes
+     */
+    function _calculateCurrentStreak(
+        address _user,
+        address _totemAddr
+    ) internal view returns (uint256) {
+        BoostData storage boostData = boosts[_user][_totemAddr];
+        
+        if (boostData.streakStartPoint == 0) return 0;
+        
+        // Get the most recent boost time (either free or premium)
+        uint256 lastBoostTime = boostData.lastBoostTimestamp > boostData.lastPremiumBoostTimestamp
+            ? boostData.lastBoostTimestamp
+            : boostData.lastPremiumBoostTimestamp;
+        
+        uint256 timeSinceLastBoost = block.timestamp - lastBoostTime;
+        uint256 allowedTimeWithoutBoost = freeBoostCooldown * 2;
+        
+        // If within the boost period, streak continues
+        if (timeSinceLastBoost < allowedTimeWithoutBoost) {
+            return boostData.actualStreakDays;
+        }
+        
+        // Calculate how many days were skipped beyond the grace period
+        uint256 extraTimeSkipped = timeSinceLastBoost - allowedTimeWithoutBoost;
+        uint256 daysSkipped = (extraTimeSkipped + freeBoostCooldown - 1) / freeBoostCooldown; // Round up
+        
+        // Special case: for exactly 2 days skip (which equals allowedTimeWithoutBoost), we should use 1 grace day
+        if (timeSinceLastBoost == allowedTimeWithoutBoost) {
+            daysSkipped = 1;
+        }
+        
+        // Check if user has enough grace days to cover the skipped days
+        uint256 availableGraceDays = boostData.graceDaysEarned - boostData.graceDaysWasted;
+        
+        if (availableGraceDays >= daysSkipped) {
+            // Grace days can preserve the streak
+            return boostData.actualStreakDays;
+        }
+        
+        // Not enough grace days - streak is broken
+        return 0;
     }
 }

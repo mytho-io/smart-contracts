@@ -259,7 +259,7 @@ contract BoostSystemTest is Base {
         (uint256 streakDays1, , ) = boostSystem.getStreakInfo(userB, totemData1.totemAddr);
         (uint256 streakDays2, , ) = boostSystem.getStreakInfo(userB, totemData2.totemAddr);
         
-        assertEq(streakDays1, 30, "First totem should have 30-day streak");
+        assertEq(streakDays1, 0, "First totem streak should be broken (too much time passed, insufficient grace days)");
         assertEq(streakDays2, 7, "Second totem should have 7-day streak");
     }
 
