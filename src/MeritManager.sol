@@ -36,7 +36,7 @@ contract MeritManager is
     uint256[4] private vestingWalletsAllocation;
     uint256 public boostFee; // Fee in native tokens for boosting
     uint256 public periodDuration;
-    uint256 public startTime; // Initially set to deployment timestamp, updated when period duration changes
+    uint256 public startTime; // Initially set to 0, updated by admin to begin merit distribution
     uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
     uint256 public lastProcessedPeriod; // Last period that was fully processed
@@ -71,6 +71,7 @@ contract MeritManager is
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
+    event StartTimeSet(uint256 startTime);
     event PostRewardUpdated(uint256 amount); // prettier-ignore
     event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
     event DonationTooSmallForMerit(address indexed totem, uint256 donationAmount, uint256 minimumRequired);
@@ -97,15 +98,19 @@ contract MeritManager is
     error NotAuthorized();
     error InsufficientKarma();
     error InvalidDivisor();
+    error StartTimeAlreadySet();
+    error InvalidStartTime();
 
     /**
      * @notice Initializes the contract with required parameters
      * @param _registryAddr Address of the AddressRegistry contract
      * @param _vestingWallets Array of vesting wallet addresses
+     * @param _vestingWalletsAllocation Array of token allocations for each vesting wallet
      */
     function initialize(
         address _registryAddr,
-        address[4] memory _vestingWallets
+        address[4] memory _vestingWallets,
+        uint256[4] memory _vestingWalletsAllocation
     ) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
@@ -116,6 +121,7 @@ contract MeritManager is
 
         for (uint i = 0; i < 4; i++) {
             if (_vestingWallets[i] == address(0)) revert InvalidAddress();
+            if (_vestingWalletsAllocation[i] == 0) revert ZeroAmount();
         }
 
         registryAddr = _registryAddr;
@@ -123,14 +129,9 @@ contract MeritManager is
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
 
         vestingWallets = _vestingWallets;
+        vestingWalletsAllocation = _vestingWalletsAllocation;
         periodDuration = 30 days;
-        startTime = block.timestamp; // Initially set to deployment timestamp
-        vestingWalletsAllocation = [
-            8_000_000 ether,
-            6_000_000 ether,
-            4_000_000 ether,
-            2_000_000 ether
-        ];
+        startTime = 0; // Must be set by admin via setStartTime to begin merit distribution
 
         oneTotemBoost = 10; // 10 merit points per boost initially
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
@@ -256,7 +257,7 @@ contract MeritManager is
     function premiumBoostReward(address _totemAddr, uint256 _amountToAdd, address _who) external {
         if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
             revert NotAuthorized();
-            
+
         _creditMerit(_totemAddr, _amountToAdd, _who, "premiumBoostReward");
     }
 
@@ -285,7 +286,7 @@ contract MeritManager is
 
         // Convert donation amount to merit points by dividing by the divisor
         uint256 meritPoints = _donationAmount * getCurrentMythumMultiplier() / donationMeritDivisor / 100;
-        
+
         if (meritPoints == 0) {
             emit DonationTooSmallForMerit(_totemAddr, _donationAmount, donationMeritDivisor);
             return;
@@ -303,6 +304,20 @@ contract MeritManager is
      */
     function updateState() external onlyRole(MANAGER) {
         _updateState();
+    }
+
+    /**
+     * @notice Sets the start time for the first period (one-time operation)
+     * @param _startTime Timestamp when the first period should begin
+     * @dev Can only be called once by MANAGER role. Start time must be in the future.
+     */
+    function setStartTime(uint256 _startTime) external onlyRole(MANAGER) {
+        if (startTime != 0) revert StartTimeAlreadySet();
+        if (_startTime <= block.timestamp) revert InvalidStartTime();
+
+        startTime = _startTime;
+
+        emit StartTimeSet(_startTime);
     }
 
     /**
@@ -528,9 +543,9 @@ contract MeritManager is
      * @param _amount Amount of merit points to credit
      */
     function _creditMerit(
-        address _totemAddr, 
-        uint256 _amount, 
-        address _who, 
+        address _totemAddr,
+        uint256 _amount,
+        address _who,
         string memory _source
     ) private {
         if (_amount == 0) revert ZeroAmount();
@@ -553,9 +568,18 @@ contract MeritManager is
      * @return Current period number
      */
     function currentPeriod() public view returns (uint256) {
-        if (block.timestamp < startTime) return accumulatedPeriods;
+        if (startTime == 0 || block.timestamp < startTime)
+            return accumulatedPeriods;
         return
             accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
+    }
+
+    /**
+     * @notice Checks if the start time has been initialized
+     * @return Whether the start time has been set by admin
+     */
+    function isStartTimeInitialized() external view returns (bool) {
+        return startTime != 0;
     }
 
     /**
@@ -569,7 +593,7 @@ contract MeritManager is
         // Get donation fee from Posts contract
         address postsAddr = AddressRegistry(registryAddr).getPosts();
         uint256 donationFeePercentage = Posts(postsAddr).donationFeePercentage();
-        
+
         // Calculate fee and amount after fee (same logic as in Posts.donateToPost)
         uint256 fee = (_donationAmount * donationFeePercentage) / 10000;
         uint256 creatorAmount = _donationAmount - fee;
@@ -585,14 +609,14 @@ contract MeritManager is
         // Get donation fee from Posts contract
         address postsAddr = AddressRegistry(registryAddr).getPosts();
         uint256 donationFeePercentage = Posts(postsAddr).donationFeePercentage();
-        
+
         // Calculate minimum donation amount that after fee deduction will give at least 1 merit point
         // creatorAmount = donationAmount - fee
         // creatorAmount = donationAmount - (donationAmount * feePercentage / 10000)
         // creatorAmount = donationAmount * (10000 - feePercentage) / 10000
         // For 1 merit point: donationMeritDivisor = donationAmount * (10000 - feePercentage) / 10000
         // donationAmount = donationMeritDivisor * 10000 / (10000 - feePercentage)
-        
+
         return (donationMeritDivisor * 10000) / (10000 - donationFeePercentage);
     }
 
@@ -606,7 +630,7 @@ contract MeritManager is
             accumulatedPeriods;
         uint256 currentPeriodStart = startTime +
             (periodsAfterAccumulation * periodDuration);
-            
+
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 23) / 30);
         return block.timestamp >= mythumStart;
     }
@@ -649,11 +673,11 @@ contract MeritManager is
 
         uint256 length = _end - _start;
         address[] memory result = new address[](length);
-        
+
         for (uint256 i = 0; i < length; i++) {
             result[i] = registeredTotemsList[_start + i];
         }
-        
+
         return result;
     }
 
