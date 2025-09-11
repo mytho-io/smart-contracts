@@ -200,15 +200,16 @@ contract TotemTokenDistributor is
             _totemTokenAmount == 0
         ) revert WrongAmount(_totemTokenAmount);
 
-        if (paymentTokenAddr == address(0)) revert ZeroAddress();
+        address totemPaymentToken = totems[_totemTokenAddr].paymentToken;
+        if (totemPaymentToken == address(0)) revert ZeroAddress();
 
         uint256 paymentTokenAmount = totemsToPaymentToken(
-            paymentTokenAddr,
+            totemPaymentToken,
             _totemTokenAmount
         );
 
         // check if user has enough payment tokens
-        if (IERC20(paymentTokenAddr).balanceOf(msg.sender) < paymentTokenAmount)
+        if (IERC20(totemPaymentToken).balanceOf(msg.sender) < paymentTokenAmount)
             revert WrongPaymentTokenAmount(paymentTokenAmount);
 
         // update totems payment token amount
@@ -222,7 +223,7 @@ contract TotemTokenDistributor is
         position.totemTokenAmount += _totemTokenAmount;
 
         // Transfer tokens using SafeERC20
-        IERC20(paymentTokenAddr).safeTransferFrom(
+        IERC20(totemPaymentToken).safeTransferFrom(
             msg.sender,
             address(this),
             paymentTokenAmount
@@ -231,7 +232,7 @@ contract TotemTokenDistributor is
 
         emit TotemTokensBought(
             msg.sender,
-            paymentTokenAddr,
+            totemPaymentToken,
             _totemTokenAddr,
             _totemTokenAmount,
             paymentTokenAmount
