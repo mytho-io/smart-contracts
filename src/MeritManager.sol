@@ -66,7 +66,13 @@ contract MeritManager is
     // Events
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
-    event MeritCredited(address indexed totem, uint256 amount, uint256 period, address indexed who, string indexed source);
+    event MeritCredited(
+        address indexed totem,
+        uint256 amount,
+        uint256 period,
+        address indexed who,
+        string indexed source
+    );
     event TotemBoosted(address indexed totem, address indexed booster, uint256 amount, uint256 period); // prettier-ignore
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
@@ -74,8 +80,16 @@ contract MeritManager is
     event StartTimeSet(uint256 startTime);
     event PostRewardUpdated(uint256 amount); // prettier-ignore
     event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
-    event DonationTooSmallForMerit(address indexed totem, uint256 donationAmount, uint256 minimumRequired);
-    event DonationRewarded(address indexed who, address indexed totemAddr, uint256 meritPoints);
+    event DonationTooSmallForMerit(
+        address indexed totem,
+        uint256 donationAmount,
+        uint256 minimumRequired
+    );
+    event DonationRewarded(
+        address indexed who,
+        address indexed totemAddr,
+        uint256 meritPoints
+    );
 
     // Custom errors
     error TotemNotRegistered();
@@ -242,7 +256,11 @@ contract MeritManager is
      * @dev Only callable by the BoostSystem contract
      * @param _totemAddr Address of the Totem to credit merit to
      */
-    function boostReward(address _totemAddr, uint256 _amountToAdd, address _who) external {
+    function boostReward(
+        address _totemAddr,
+        uint256 _amountToAdd,
+        address _who
+    ) external {
         if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
             revert NotAuthorized();
 
@@ -254,7 +272,11 @@ contract MeritManager is
      * @dev Only callable by the BoostSystem contract
      * @param _totemAddr Address of the Totem to credit merit to
      */
-    function premiumBoostReward(address _totemAddr, uint256 _amountToAdd, address _who) external {
+    function premiumBoostReward(
+        address _totemAddr,
+        uint256 _amountToAdd,
+        address _who
+    ) external {
         if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
             revert NotAuthorized();
 
@@ -270,7 +292,8 @@ contract MeritManager is
         if (msg.sender != AddressRegistry(registryAddr).getPosts())
             revert NotAuthorized();
 
-        uint256 amountToAdd = postRewardPoints * getCurrentMythumMultiplier() / 100;
+        uint256 amountToAdd = (postRewardPoints *
+            getCurrentMythumMultiplier()) / 100;
         _creditMerit(_totemAddr, amountToAdd, _who, "postReward");
     }
 
@@ -280,15 +303,24 @@ contract MeritManager is
      * @param _totemAddr Address of the Totem to credit merit to
      * @param _donationAmount Amount of the donation in wei
      */
-    function donationReward(address _totemAddr, uint256 _donationAmount) external {
+    function donationReward(
+        address _totemAddr,
+        uint256 _donationAmount
+    ) external {
         if (msg.sender != AddressRegistry(registryAddr).getPosts())
             revert NotAuthorized();
 
         // Convert donation amount to merit points by dividing by the divisor
-        uint256 meritPoints = _donationAmount * getCurrentMythumMultiplier() / donationMeritDivisor / 100;
+        uint256 meritPoints = (_donationAmount * getCurrentMythumMultiplier()) /
+            donationMeritDivisor /
+            100;
 
         if (meritPoints == 0) {
-            emit DonationTooSmallForMerit(_totemAddr, _donationAmount, donationMeritDivisor);
+            emit DonationTooSmallForMerit(
+                _totemAddr,
+                _donationAmount,
+                donationMeritDivisor
+            );
             return;
         }
 
@@ -397,12 +429,15 @@ contract MeritManager is
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newPeriodDuration < 1 days) revert InvalidPeriodDuration();
 
+        // First, process all pending periods with the current period duration
+        _updateState();
+
         // Store the current period count before changing the duration
         accumulatedPeriods = currentPeriod();
         startTime = block.timestamp; // Reset the start time to now
 
         periodDuration = _newPeriodDuration;
-        lastProcessedPeriod = currentPeriod();
+
         emit ParameterUpdated("periodDuration", _newPeriodDuration);
     }
 
@@ -458,7 +493,9 @@ contract MeritManager is
      * @notice Sets the divisor used to calculate merit points from donation amount
      * @param _divisor New divisor value (e.g. 1e14 means 0.001 ETH = 10 merit points)
      */
-    function setDonationMeritDivisor(uint256 _divisor) external onlyRole(MANAGER) {
+    function setDonationMeritDivisor(
+        uint256 _divisor
+    ) external onlyRole(MANAGER) {
         if (_divisor == 0) revert InvalidDivisor();
         donationMeritDivisor = _divisor;
         emit ParameterUpdated("donationMeritDivisor", _divisor);
@@ -592,13 +629,17 @@ contract MeritManager is
     ) external view returns (uint256) {
         // Get donation fee from Posts contract
         address postsAddr = AddressRegistry(registryAddr).getPosts();
-        uint256 donationFeePercentage = Posts(postsAddr).donationFeePercentage();
+        uint256 donationFeePercentage = Posts(postsAddr)
+            .donationFeePercentage();
 
         // Calculate fee and amount after fee (same logic as in Posts.donateToPost)
         uint256 fee = (_donationAmount * donationFeePercentage) / 10000;
         uint256 creatorAmount = _donationAmount - fee;
 
-        return creatorAmount * getCurrentMythumMultiplier() / donationMeritDivisor / 100;
+        return
+            (creatorAmount * getCurrentMythumMultiplier()) /
+            donationMeritDivisor /
+            100;
     }
 
     /**
@@ -608,7 +649,8 @@ contract MeritManager is
     function getMinimumDonationForMerit() external view returns (uint256) {
         // Get donation fee from Posts contract
         address postsAddr = AddressRegistry(registryAddr).getPosts();
-        uint256 donationFeePercentage = Posts(postsAddr).donationFeePercentage();
+        uint256 donationFeePercentage = Posts(postsAddr)
+            .donationFeePercentage();
 
         // Calculate minimum donation amount that after fee deduction will give at least 1 merit point
         // creatorAmount = donationAmount - fee
@@ -663,7 +705,10 @@ contract MeritManager is
      * @param _end The ending index (exclusive)
      * @return Array of registered totem addresses within the specified range
      */
-    function getAllRegisteredTotems(uint256 _start, uint256 _end) external view returns (address[] memory) {
+    function getAllRegisteredTotems(
+        uint256 _start,
+        uint256 _end
+    ) external view returns (address[] memory) {
         if (_end > registeredTotemsList.length) {
             _end = registeredTotemsList.length;
         }
