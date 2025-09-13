@@ -34,10 +34,10 @@ contract MeritManager is
     address private registryAddr;
     address[4] private vestingWallets;
     uint256[4] private vestingWalletsAllocation;
-    uint256 public boostFee; // Fee in native tokens for boosting
+    uint256 public boostFee; // Deprecated, remained for layout consistency
     uint256 public periodDuration;
     uint256 public startTime; // Initially set to 0, updated by admin to begin merit distribution
-    uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
+    uint256 public oneTotemBoost; // Deprecated, remained for layout consistency
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
     uint256 public lastProcessedPeriod; // Last period that was fully processed
     uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
@@ -50,8 +50,8 @@ contract MeritManager is
     mapping(uint256 period => mapping(address totemAddr => bool claimed))
         public isClaimed; // Whether rewards have been claimed for a period by a specific totem
     mapping(uint256 period => uint256 releasedMytho) public releasedMytho; // Total MYTHO released per period
-    mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Whether a user has boosted in a period
-    mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Which Totem a user boosted in a period
+    mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Deprecated, remained for layout consistency
+    mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Deprecated, remained for layout consistency
     mapping(address => bool) public registeredTotems; // Totem state tracking
     mapping(address => uint256) public totemKarma; // Karma points per totem
 
@@ -73,7 +73,6 @@ contract MeritManager is
         address indexed who,
         string indexed source
     );
-    event TotemBoosted(address indexed totem, address indexed booster, uint256 amount, uint256 period); // prettier-ignore
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
@@ -97,9 +96,6 @@ contract MeritManager is
     error TotemAlreadyRegistered();
     error AlreadyBlacklisted(address totem);
     error AlreadyNotInBlacklist(address totem);
-    error InsufficientBoostFee();
-    error NotInMythumPeriod();
-    error AlreadyBoostedInPeriod();
     error AccessControl();
     error NoMythoToClaim();
     error AlreadyClaimed(uint256 period);
@@ -147,9 +143,7 @@ contract MeritManager is
         periodDuration = 30 days;
         startTime = 0; // Must be set by admin via setStartTime to begin merit distribution
 
-        oneTotemBoost = 10; // 10 merit points per boost initially
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
-        boostFee = 0.001 ether; // 0.001 native tokens for boost fee
         postRewardPoints = 500; // 500 merit points for post creation initially
         donationMeritDivisor = 1e14; // 1e14 divisor initially
     }
@@ -169,52 +163,6 @@ contract MeritManager is
         registeredTotemsList.push(_totemAddr);
 
         emit TotemRegistered(_totemAddr);
-    }
-
-    /**
-     * @notice Allows a user to boost a totem by paying a fee
-     * @param _totemAddr Address of the totem to boost
-     */
-    function boostTotem(
-        address _totemAddr
-    ) external payable nonReentrant whenNotPaused {
-        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
-        if (msg.value < boostFee) revert InsufficientBoostFee();
-        if (!isMythum()) revert NotInMythumPeriod();
-
-        // Get the totem token address and check if the user has it
-        (address totemTokenAddr, , ) = Totem(_totemAddr).getTokenAddresses();
-        if (IERC20(totemTokenAddr).balanceOf(msg.sender) == 0)
-            revert InsufficientTotemBalance();
-
-        uint256 currentPeriod_ = currentPeriod();
-
-        if (userBoostedInPeriod[currentPeriod_][msg.sender])
-            revert AlreadyBoostedInPeriod();
-
-        if (msg.value > boostFee) {
-            // Refund excess boost fee
-            payable(msg.sender).sendValue(msg.value - boostFee);
-        }
-
-        // Transfer boost fee to revenue pool
-        payable(treasuryAddr).sendValue(boostFee);
-
-        // Mark user as having boosted in this period
-        userBoostedInPeriod[currentPeriod_][msg.sender] = true;
-        userBoostedTotem[currentPeriod_][msg.sender] = _totemAddr;
-
-        // Add merit to the totem
-        totemMerit[currentPeriod_][_totemAddr] += oneTotemBoost;
-        totalMeritPoints[currentPeriod_] += oneTotemBoost;
-
-        emit TotemBoosted(
-            _totemAddr,
-            msg.sender,
-            oneTotemBoost,
-            currentPeriod_
-        );
     }
 
     /**
@@ -388,18 +336,6 @@ contract MeritManager is
     }
 
     /**
-     * @notice Sets the one Totem boost amount
-     * @param _oneTotemBoost New boost amount
-     */
-    function setOneTotemBoost(
-        uint256 _oneTotemBoost
-    ) external onlyRole(MANAGER) {
-        if (_oneTotemBoost == 0) revert ZeroAmount();
-        oneTotemBoost = _oneTotemBoost;
-        emit ParameterUpdated("oneTotemBoost", _oneTotemBoost);
-    }
-
-    /**
      * @notice Sets the Mythum multiplier (in percentage, e.g., 150 = 1.5x)
      * @param _mythumMultiplier New multiplier value
      */
@@ -409,15 +345,6 @@ contract MeritManager is
         if (_mythumMultiplier == 0) revert ZeroAmount();
         mythumMultiplier = _mythumMultiplier;
         emit ParameterUpdated("mythumMultiplier", _mythumMultiplier);
-    }
-
-    /**
-     * @notice Sets the boost fee in native tokens
-     * @param _boostFee New boost fee
-     */
-    function setBoostFee(uint256 _boostFee) external onlyRole(MANAGER) {
-        boostFee = _boostFee;
-        emit ParameterUpdated("boostFee", _boostFee);
     }
 
     /**
@@ -846,31 +773,5 @@ contract MeritManager is
         uint256 _periodNum
     ) external view returns (uint256) {
         return totemMerit[_periodNum][_totemAddr];
-    }
-
-    /**
-     * @notice Gets whether a user has boosted in a specific period
-     * @param _user User address to check
-     * @param _periodNum Period number to check
-     * @return Whether the user has boosted in the specified period
-     */
-    function hasUserBoostedInPeriod(
-        address _user,
-        uint256 _periodNum
-    ) external view returns (bool) {
-        return userBoostedInPeriod[_periodNum][_user];
-    }
-
-    /**
-     * @notice Gets which totem a user boosted in a specific period
-     * @param _user User address to check
-     * @param _periodNum Period number to check
-     * @return Address of the totem the user boosted
-     */
-    function getUserBoostedTotem(
-        address _user,
-        uint256 _periodNum
-    ) external view returns (address) {
-        return userBoostedTotem[_periodNum][_user];
     }
 }
