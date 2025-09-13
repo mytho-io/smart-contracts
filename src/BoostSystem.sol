@@ -497,23 +497,6 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         emit ParameterUpdated("badgeNFT", uint256(uint160(_badgeNFT)));
     }
 
-    /**
-     * @notice Updates the milestones array for badge achievements
-     * @param _newMilestones New array of milestone values (e.g., [7, 14, 30, 100, 200])
-     * @dev Only MANAGER role can update milestones. This will replace the entire milestones array.
-     */
-    function updateMilestones(uint256[] calldata _newMilestones) external onlyRole(MANAGER) {
-        // Validate that all milestones are greater than 0
-        for (uint256 i = 0; i < _newMilestones.length; i++) {
-            require(_newMilestones[i] > 0, "Milestone must be greater than 0");
-        }
-        
-        // Replace the entire milestones array
-        milestones = _newMilestones;
-        
-        emit ParameterUpdated("milestonesUpdated", _newMilestones.length);
-    }
-
     // INTERNAL FUNCTIONS
 
     /**
