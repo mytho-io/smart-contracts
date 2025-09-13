@@ -59,6 +59,8 @@ contract TotemTokenDistributor is
     mapping(address userAddress => mapping(address totemTokenAddr => SalePosInToken))
         private salePositions;
 
+    mapping(address totemTokenAddr => uint256) private minSellAmount; // Minimum amount required to sell tokens
+
     // Constants
     uint256 private constant PRECISION = 10000;
     uint256 private constant POOL_INITIAL_SUPPLY = 200_000_000 ether;
@@ -270,7 +272,8 @@ contract TotemTokenDistributor is
         if (
             _totemTokenAmount > position.totemTokenAmount ||
             _totemTokenAmount > IERC20(_totemTokenAddr).balanceOf(msg.sender) ||
-            _totemTokenAmount == 0
+            _totemTokenAmount == 0 ||
+            _totemTokenAmount < minSellAmount[_totemTokenAddr]
         ) revert WrongAmount(_totemTokenAmount);
 
         // calculate the right number of payment tokens according to _totemTokenAmount share in sale position
@@ -750,13 +753,26 @@ contract TotemTokenDistributor is
     }
 
     /**
+     * @notice Sets the minimum sell amount for a specific totem token
+     * @param _totemTokenAddr Address of the totem token
+     * @param _minAmount Minimum amount required to sell (0 means no minimum)
+     */
+    function setMinSellAmount(
+        address _totemTokenAddr,
+        uint256 _minAmount
+    ) external onlyRole(MANAGER) {
+        if (_totemTokenAddr == address(0)) revert ZeroAddress();
+        minSellAmount[_totemTokenAddr] = _minAmount;
+    }
+
+    /**
      * @notice Returns the current slippage percentage
      * @return The current slippage percentage (multiplied by PRECISION)
      */
     function getSlippagePercentage() external view returns (uint256) {
         return slippagePercentage;
     }
-    
+
     /**
      * @notice Checks if a totem token is registered
      * @param _totemTokenAddr Address of the totem token
@@ -764,5 +780,16 @@ contract TotemTokenDistributor is
      */
     function isTotemRegistered(address _totemTokenAddr) external view returns (bool) {
         return totems[_totemTokenAddr].registered;
+    }
+
+    /**
+     * @notice Returns the minimum sell amount for a specific totem token
+     * @param _totemTokenAddr Address of the totem token
+     * @return Minimum amount required to sell (0 means no minimum)
+     */
+    function getMinSellAmount(
+        address _totemTokenAddr
+    ) external view returns (uint256) {
+        return minSellAmount[_totemTokenAddr];
     }
 }
