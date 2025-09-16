@@ -375,7 +375,13 @@ contract Base is Test {
         registry.setAddress(bytes32("MYTHO_TOKEN"), address(mytho));
         registry.setAddress(bytes32("MYTHO_TREASURY"), address(treasury));
 
-        mm.initialize(address(registry), vestingAddresses);
+        uint256[4] memory vestingAllocations;
+        vestingAllocations[0] = 8_000_000 ether;
+        vestingAllocations[1] = 6_000_000 ether;
+        vestingAllocations[2] = 4_000_000 ether;
+        vestingAllocations[3] = 2_000_000 ether;
+        
+        mm.initialize(address(registry), vestingAddresses, vestingAllocations);
 
         // TotemTokenDistributor
         distrImpl = new TTD();
@@ -412,6 +418,9 @@ contract Base is Test {
 
         mm.grantRole(mm.REGISTRATOR(), address(distr));
         mm.grantRole(mm.REGISTRATOR(), address(factory));
+        
+        // Set start time for merit distribution to begin immediately
+        mm.setStartTime(block.timestamp + 1);
 
         // Deploy TokenHoldersOracle
         address routerAddress = makeAddr("chainlinkFunctionsRouter");

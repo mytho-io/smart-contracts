@@ -4,6 +4,42 @@ pragma solidity ^0.8.20;
 import "./Base.t.sol";
 
 contract ComplexTest is Base {
+    function test_DosOnChangingPaymentToken() public {
+        prank(deployer);
+        distr.setMaxTotemTokensPerAddress(1e36);
+
+        MockV3Aggregator mockV3Aggregator2 = new MockV3Aggregator(8, 0.05e8);
+
+        MockToken paymentToken2 = new MockToken();
+        paymentToken2.mint(userA, 1_000_000_000 ether);
+        paymentToken2.mint(userB, 1_000_000_000 ether);
+
+        vm.startPrank(userA);
+        address[] memory myCollabs = new address [](1);
+        myCollabs[0] = userB;
+
+        astrToken.approve(address(factory), 5e18);
+        factory.createTotem("SimpleTotem", "SIMPLE", "SMPL", myCollabs);
+
+        vm.stopPrank();
+
+        TF.TotemData memory data = factory.getTotemData(0);
+
+        vm.startPrank(userB);
+        paymentToken.approve(address(distr), paymentToken.balanceOf(userB));
+        distr.buy(data.totemTokenAddr, 500_000_000e18);
+        vm.stopPrank();
+
+        vm.startPrank(deployer);
+        distr.setPaymentToken(address(paymentToken2));
+        distr.setPriceFeed(address(paymentToken2), address(mockV3Aggregator2));
+        vm.stopPrank();
+
+        vm.startPrank(userB);
+        paymentToken2.approve(address(distr), paymentToken2.balanceOf(userB));
+        distr.buy(data.totemTokenAddr, 199_750_000e18);
+        vm.stopPrank();        
+    }
 
     // Test totem creation and initial token distribution
     function test_TotemCreating_NewToken() public {
@@ -400,73 +436,6 @@ contract ComplexTest is Base {
         token.transfer(userB, 100 ether);
     }
 
-    // Test boosting totem in Mythus period
-    function test_TotemBoosting() public {
-        address totemTokenAddr = createTotemWithAddrInReturn(userA);
-        TF.TotemData memory data = factory.getTotemData(0);
-
-        uint256 available = distr.getAvailableTokensForPurchase(
-            userA,
-            totemTokenAddr
-        );
-        assertEq(available, 4_750_000 ether);
-
-        // but all totem tokens and check if the distr balance eq to zero
-        buyAllTotemTokens(totemTokenAddr);
-        assertEq(IERC20(totemTokenAddr).balanceOf(address(distr)), 0);
-
-        vm.deal(userA, 1 ether); // Provide ETH for boost fee
-        prank(userA);
-
-        // try to boost not in mythus period and fail
-        vm.expectRevert(MM.NotInMythumPeriod.selector);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
-        // revert if boost fee too small
-        vm.expectRevert(MM.InsufficientBoostFee.selector);
-        mm.boostTotem{value: 0.0001 ether}(data.totemAddr);
-
-        // revert if totem blacklisted
-        prank(deployer);
-        mm.grantRole(mm.BLACKLISTED(), data.totemAddr);
-        prank(userA);
-        vm.expectRevert(MM.TotemInBlacklist.selector);
-        mm.boostTotem{value: 0.0001 ether}(data.totemAddr);
-
-        // revoke blacklisted role from totem
-        prank(deployer);
-        mm.revokeRole(mm.BLACKLISTED(), data.totemAddr);
-
-        // Warp to Mythus period (last 25% of period)
-        warp(23 days);
-
-        prank(userA);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
-        // try to boost another time in the same period and fail
-        vm.expectRevert(MM.AlreadyBoostedInPeriod.selector);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
-        uint256 period = mm.currentPeriod();
-        assertTrue(mm.hasUserBoostedInPeriod(userA, period));
-        assertEq(mm.getTotemMeritPoints(data.totemAddr, period), 10); // Default boost value
-        assertEq(address(treasury).balance, 0.001 ether);
-        assertEq(mm.getUserBoostedTotem(userA, period), data.totemAddr);
-        assertEq(mm.getUserBoostedTotem(userA, period + 1), address(0));
-
-        // boost totem in the next mythum period
-        warp(30 days);
-
-        mm.boostTotem{value: 0.002 ether}(data.totemAddr);
-        assertEq(address(treasury).balance, 0.002 ether);
-
-        // check if points added correctly in the next period
-        assertEq(mm.getTotemMeritPoints(data.totemAddr, period + 1), 10); // Default boost value
-        assertEq(mm.getTotemMeritPoints(data.totemAddr, period + 2), 0);
-        assertEq(mm.getUserBoostedTotem(userA, period + 1), data.totemAddr);
-        assertEq(mm.getUserBoostedTotem(userA, period + 2), address(0));
-    }
-
     // Test access control for manager functions
     function test_AccessControl() public {
         // Non-manager trying to credit merit
@@ -589,85 +558,6 @@ contract ComplexTest is Base {
         uint256 totalClaimed = claimed1 + claimed2 + claimed3;
         uint256 expectedRelease = mm.releasedMytho(0);
         assertApproxEqRel(totalClaimed, expectedRelease, 1e15);
-    }
-
-    // Test totem lifecycle across multiple periods
-    function test_TotemLifecycleAcrossMultiplePeriods() public {
-        address totemTokenAddr = createTotemWithAddrInReturn(userA);
-        TF.TotemData memory data = factory.getTotemData(0);
-        Totem totem = Totem(data.totemAddr);
-
-        // End sale period to register the totem in MeritManager
-        buyAllTotemTokens(totemTokenAddr);
-
-        // Get current period
-        uint256 currentPeriod = mm.currentPeriod();
-
-        // Credit merit in current period
-        prank(deployer);
-        mm.creditMerit(data.totemAddr, 800);
-
-        // Warp to Mythum period (23/30 of the period duration)
-        uint256 periodDuration = mm.periodDuration();
-        uint256 mythumStart = (periodDuration * 23) / 30;
-        warp(mythumStart + 1);
-
-        // Boost in Mythum period
-        vm.deal(userA, 1 ether);
-        prank(userA);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
-        // Add additional merit
-        prank(deployer);
-        mm.creditMerit(data.totemAddr, 500);
-
-        // Get actual merit points and adjust our expectations
-        uint256 actualMerit = mm.getTotemMeritPoints(
-            data.totemAddr,
-            currentPeriod
-        );
-        console.log("Actual merit:", actualMerit);
-
-        // Just assert that we have merit points, the exact value may vary due to multipliers
-        assertGt(actualMerit, 0);
-
-        // Move to next period
-        warp(periodDuration + 1);
-        prank(deployer);
-        mm.updateState();
-
-        // Make sure the totem is registered in Merit Manager before claiming
-        if (!mm.isRegisteredTotem(address(totem))) {
-            prank(deployer);
-            mm.register(address(totem));
-        }
-
-        // Wait for MYTHO distribution
-        warp(1 days);
-        prank(deployer);
-        mm.updateState(); // This will process any pending periods and distribute MYTHO
-
-        // Claim MYTHO from previous period
-        prank(address(totem));
-        totem.collectMYTH(currentPeriod);
-
-        // Move to next period
-        warp(periodDuration + 1);
-        prank(deployer);
-        mm.updateState();
-
-        // Credit merit in new period
-        prank(deployer);
-        mm.creditMerit(data.totemAddr, 300);
-
-        // Warp to next period
-        warp(periodDuration + 1);
-        prank(deployer);
-        mm.updateState();
-
-        // Claim MYTHO for the period with 300 merit
-        prank(address(totem));
-        totem.collectMYTH(currentPeriod + 2);
     }
 
     // Test token redeeming with multiple users
@@ -876,36 +766,6 @@ contract ComplexTest is Base {
         distr.buy(fakeToken, 100 ether);
     }
 
-    // Test MeritManager error cases
-    function test_MeritManagerErrorCases() public {
-        address totemTokenAddr = createTotemWithAddrInReturn(userA);
-        TF.TotemData memory data = factory.getTotemData(0);
-
-        // Test crediting merit to non-registered totem
-        address fakeTotem = address(0x123);
-        prank(deployer);
-        vm.expectRevert(MM.TotemNotRegistered.selector);
-        mm.creditMerit(fakeTotem, 100);
-
-        // Test boosting non-registered totem
-        vm.deal(userA, 1 ether);
-        prank(userA);
-        vm.expectRevert(MM.TotemNotRegistered.selector);
-        mm.boostTotem{value: 0.001 ether}(fakeTotem);
-
-        // Test claiming for invalid period
-        buyAllTotemTokens(totemTokenAddr);
-        Totem totem = Totem(data.totemAddr);
-        prank(address(totem));
-        vm.expectRevert(abi.encodeWithSelector(MM.InvalidPeriod.selector));
-        totem.collectMYTH(999); // Non-existent period
-
-        // Test claiming with no merit points
-        prank(address(totem));
-        vm.expectRevert(MM.NoMythoToClaim.selector);
-        totem.collectMYTH(0); // No merit points in period 0
-    }
-
     // Test TotemFactory error cases
     function test_TotemFactoryErrorCases() public {
         // Test creating totem with empty parameters (empty token name, symbol, or dataHash)
@@ -1062,50 +922,6 @@ contract ComplexTest is Base {
         assertEq(treasury.getNativeBalance(), 1 ether);
     }
 
-    // Test boostTotem with insufficient totem token balance
-    function test_BoostTotem_InsufficientTotemBalance() public {
-        address totemTokenAddr = createTotemWithAddrInReturn(userA);
-        TF.TotemData memory data = factory.getTotemData(0);
-
-        // End sale period to allow transfers
-        buyAllTotemTokens(totemTokenAddr);
-
-        // Warp to Mythus period (last 25% of period)
-        warp(23 days);
-
-        // User B has no totem tokens, should fail with InsufficientTotemBalance
-        vm.deal(userB, 1 ether); // Provide ETH for boost fee
-        prank(userB);
-        vm.expectRevert(MM.InsufficientTotemBalance.selector);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
-        // Transfer some tokens to userB
-        prank(userA);
-        IERC20(totemTokenAddr).transfer(userB, 100 ether);
-
-        // Now userB has tokens and should be able to boost
-        prank(userB);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
-        // Verify the boost was successful
-        uint256 period = mm.currentPeriod();
-        assertTrue(mm.hasUserBoostedInPeriod(userB, period));
-        assertEq(mm.getUserBoostedTotem(userB, period), data.totemAddr);
-        assertEq(mm.getUserBoostedTotem(userB, period + 1), address(0));
-
-        // boost totem in the next mythum period
-        warp(30 days);
-
-        mm.boostTotem{value: 0.002 ether}(data.totemAddr);
-        assertEq(address(treasury).balance, 0.002 ether);
-
-        // check if points added correctly in the next period
-        assertEq(mm.getTotemMeritPoints(data.totemAddr, period + 1), 10); // Default boost value
-        assertEq(mm.getTotemMeritPoints(data.totemAddr, period + 2), 0);
-        assertEq(mm.getUserBoostedTotem(userB, period + 1), data.totemAddr);
-        assertEq(mm.getUserBoostedTotem(userB, period + 2), address(0));
-    }
-
     // Test Totem token redeeming error cases
     function test_TotemredeemingErrorCases() public {
         address totemTokenAddr = createTotemWithAddrInReturn(userA);
@@ -1225,18 +1041,11 @@ contract ComplexTest is Base {
     function test_MeritManager_AdminFunctions() public {
         // Test setOneTotemBoost
         prank(deployer);
-        mm.setOneTotemBoost(20);
-        assertEq(mm.oneTotemBoost(), 20);
 
         // Test setMythumMultiplier
         prank(deployer);
         mm.setMythumMultiplier(200); // 2x
         assertEq(mm.mythumMultiplier(), 200);
-
-        // Test setBoostFee
-        prank(deployer);
-        mm.setBoostFee(0.002 ether);
-        assertEq(mm.boostFee(), 0.002 ether);
 
         // Test setPeriodDuration
         prank(deployer);
@@ -1514,12 +1323,6 @@ contract ComplexTest is Base {
         prank(deployer);
         mm.pause();
 
-        // Verify boostTotem is blocked when paused
-        vm.deal(userA, 1 ether);
-        prank(userA);
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
-
         // Verify register is blocked when paused
         address newTotem = makeAddr("newTotem");
         prank(address(distr));
@@ -1534,11 +1337,6 @@ contract ComplexTest is Base {
         // Unpause and verify operations work again
         prank(deployer);
         mm.unpause();
-
-        // Boost should work after unpausing
-        vm.deal(userA, 1 ether);
-        prank(userA);
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
 
         // Verify access control for pause/unpause
         prank(userA);
@@ -1691,12 +1489,6 @@ contract ComplexTest is Base {
         prank(deployer);
         vm.expectRevert();
         mm.creditMerit(data.totemAddr, 100);
-
-        // Verify boost function respects ecosystem pause
-        vm.deal(userA, 1 ether);
-        prank(userA);
-        vm.expectRevert();
-        mm.boostTotem{value: 0.001 ether}(data.totemAddr);
 
         // Verify TotemTokenDistributor respects ecosystem pause
         prank(userA);
@@ -1923,10 +1715,6 @@ contract ComplexTest is Base {
 
         // Test getTotemMeritPoints
         assertEq(mm.getTotemMeritPoints(data.totemAddr, currentPeriod), 1000);
-
-        // Test hasUserBoostedInPeriod and getUserBoostedTotem
-        assertFalse(mm.hasUserBoostedInPeriod(userA, currentPeriod));
-        assertEq(mm.getUserBoostedTotem(userA, currentPeriod), address(0));
     }
 
     function test_getTotemData() public {

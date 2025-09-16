@@ -93,7 +93,8 @@ contract MythoTest is Test {
         
         // Prepare initialization data for BurnMintMYTHO
         bytes memory burnMintInitData = abi.encodeWithSelector(
-            BurnMintMYTHO.initialize.selector
+            BurnMintMYTHO.initialize.selector,
+            address(registry)
         );
         
         // Deploy BurnMintMYTHO proxy

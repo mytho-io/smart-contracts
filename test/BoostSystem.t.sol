@@ -4,6 +4,170 @@ pragma solidity ^0.8.20;
 import "./Base.t.sol";
 
 contract BoostSystemTest is Base {
+    function test_stepwiseOnSetPremiumBoostGracePeriod() public {
+        prank(deployer);
+        distr.setMaxTotemTokensPerAddress(1e36);
+
+        deal(userA, 1000 ether);
+        deal(userB, 1000 ether);
+        deal(userC, 1000 ether);
+
+        vm.startPrank(userA);
+        address[] memory myCollabs = new address [](1);
+        myCollabs[0] = userC;
+        astrToken.approve(address(factory), 5e18);
+        factory.createTotem("SimpleTotem", "SIMPLE", "SMPL", myCollabs);
+        vm.stopPrank();
+
+        TF.TotemData memory data = factory.getTotemData(0);
+
+        vm.startPrank(userB);
+        paymentToken.approve(address(distr),
+        paymentToken.balanceOf(userB));
+        distr.buy(data.totemTokenAddr, 699_750_000e18);
+
+        // 3 DAYS BOOST
+        for(uint i = 1; i < 4; i++){
+            uint consecutiveDays = i * 86400;
+            vm.warp(consecutiveDays);
+            boostSystem.premiumBoost{value: 0.00003 ether}
+            (data.totemAddr);
+            mockVRFCoordinator.fulfillRandomWords(i);
+        }
+        vm.stopPrank();
+
+        printStreakInfo(userB, data.totemAddr);
+
+        vm.warp(block.timestamp + (24 hours - 1 hours));
+
+        // CHANGE THE GRACE PERIOD
+        vm.startPrank(deployer);
+        boostSystem.setPremiumBoostGracePeriod(72 hours);
+        vm.stopPrank();
+
+        printStreakInfo(userB, data.totemAddr);
+
+        warp(1 hours + 48 hours);
+
+        vm.startPrank(userB);
+        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(4);
+        vm.stopPrank();
+
+        printStreakInfo(userB, data.totemAddr);
+    }
+
+    function test_BoostStreakWithCooldownChanging() public {
+        createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(0);
+
+        // Complete totem token sale period
+        buyAllTotemTokens(data.totemTokenAddr);
+
+        // Make 10 days streak
+        for (uint256 i; i < 10; i++) {
+            performBoost(userA, data.totemAddr);
+        }
+
+        (uint256 streakDays, , ) = boostSystem.getStreakInfo(userA, data.totemAddr);
+        assertEq(streakDays, 10, "10 days streak should be completed");
+
+        prank(deployer);
+        boostSystem.setFreeBoostCooldown(6 hours);
+
+        (streakDays, , ) = boostSystem.getStreakInfo(userA, data.totemAddr);
+        assertEq(streakDays, 10, "10 days streak should still be without reset");
+
+        // Make boost and it shouldn't break the streak
+        performBoost(userA, data.totemAddr);
+
+        (streakDays, , ) = boostSystem.getStreakInfo(userA, data.totemAddr);
+        assertEq(streakDays, 11, "11 days streak should be completed");
+
+        warp(12 hours);
+        
+        (streakDays, , ) = boostSystem.getStreakInfo(userA, data.totemAddr);
+        assertEq(streakDays, 0, "Streak should be reset if boost window has passed");
+    }
+
+    function test_Base_Milestones_toValidate() public {
+        deal(userA, 1000 ether);
+        deal(userB, 1000 ether);
+        deal(userC, 1000 ether);
+
+        prank(deployer);
+        distr.setMaxTotemTokensPerAddress(1e36);
+
+        // Create Whitelisted totem
+        vm.startPrank(userA);
+        astrToken.approve(address(factory), 5e18);
+        address[] memory collaborators = new address[](0);
+
+        factory.createTotem("NEW ERC 20", "NERC20", "NERC20", collaborators);
+        TF.TotemData memory data = factory.getTotemData(0);
+        vm.stopPrank();
+
+
+        vm.startPrank(userB);
+        paymentToken.approve(address(distr), paymentToken.balanceOf(userB));
+        distr.buy(data.totemTokenAddr, 699_750_000e18);
+        vm.stopPrank();
+
+
+        vm.startPrank(userA);
+        posts.createPost(address(data.totemAddr), "Bang");
+        vm.stopPrank();
+
+
+        vm.startPrank(userB);
+        for(uint i = 1; i < 5; i++){
+            uint consecutiveDays = i * 86400;
+            bytes memory signature1001 = createBoostSignature(userB, data.totemAddr, consecutiveDays);
+
+            vm.warp(consecutiveDays);
+            boostSystem.boost(data.totemAddr, consecutiveDays, signature1001);
+        }
+
+        vm.stopPrank();
+
+        printStreakInfo(userB, data.totemAddr);
+
+
+        (uint boostReward, uint premiumMinRew, uint premiumMaxRew, uint premiumExpect) = boostSystem.getExpectedRewards(userB, data.totemAddr);
+
+        console.log("");
+        console.log("boostReward", boostReward);
+        console.log("premiumMinRew", premiumMinRew);
+        console.log("premiumMaxRew", premiumMaxRew);
+        console.log("premiumExpect", premiumExpect);
+        console.log("");
+
+
+
+        vm.startPrank(deployer);
+        boostSystem.setBoostRewardPoints(500);
+        vm.stopPrank();
+
+
+        vm.warp(block.timestamp + 1 days);
+        vm.startPrank(userB);
+
+        uint addDays = block.timestamp;
+        bytes memory signature1001 = createBoostSignature(userB, data.totemAddr, addDays);
+        boostSystem.boost(data.totemAddr, addDays, signature1001);
+        vm.stopPrank();
+
+        printStreakInfo(userB, data.totemAddr);
+
+        (uint boostRewardAfter, uint premiumMinRewAfter, uint premiumMaxRewAfter, uint premiumExpectAfter) = boostSystem.getExpectedRewards(userB, data.totemAddr);
+
+        console.log("");
+        console.log("boostRewardAfter", boostRewardAfter);
+        console.log("premiumMinRewAfter", premiumMinRewAfter);
+        console.log("premiumMaxRewAfter", premiumMaxRewAfter);
+        console.log("premiumExpectAfter", premiumExpectAfter);
+        console.log("");
+    }
 
     function test_Mix() public {
         // Scenario: user creates a totem, then performs a regular boost, 
@@ -565,7 +729,15 @@ contract BoostSystemTest is Base {
         warp(1 days);
         performBoost(userB, totemData.totemAddr);
         uint256 finalPeriodAfterBoost = mm.currentPeriod();
-        uint256 reward = mm.getTotemMeritPoints(totemData.totemAddr, finalPeriodAfterBoost) - meritBefore;
+        
+        uint256 reward;
+        if (finalPeriodAfterBoost == finalPeriodNum) {
+            // Same period - calculate difference
+            reward = mm.getTotemMeritPoints(totemData.totemAddr, finalPeriodAfterBoost) - meritBefore;
+        } else {
+            // Different period - just get the merit points from the new period
+            reward = mm.getTotemMeritPoints(totemData.totemAddr, finalPeriodAfterBoost);
+        }
         
         // Check if we're in Mythum period (which applies 1.5x multiplier)
         if (mm.isMythum()) {
@@ -1921,5 +2093,157 @@ contract BoostSystemTest is Base {
         
         (streak, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
         assertEq(streak, 3, "After premium boost (48 hours since last streak increment) streak should be 3");
+    }
+
+    function test_GraceDaysFromStreak_AwardedInLateBranch() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory totemData = factory.getTotemData(totemId);
+
+        // Buy tokens
+        prank(userB);
+        uint256 available = distr.getAvailableTokensForPurchase(userB, totemData.totemTokenAddr);
+        paymentToken.approve(address(distr), available);
+        distr.buy(totemData.totemTokenAddr, available);
+        buyAllTotemTokens(totemData.totemTokenAddr);
+
+        // Build streak to 27 via daily boosts
+        for (uint256 i = 0; i < 27; i++) {
+            performBoost(userB, totemData.totemAddr);
+            if (i < 26) warp(1 days);
+        }
+
+        // Earn 2 grace days via two premium boosts on separate days
+        (uint256 price, ) = boostSystem.getPremiumBoostConfig();
+        vm.deal(userB, 10 ether);
+        warp(1 days);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(1);
+        warp(1 days);
+        prank(userB);
+        boostSystem.premiumBoost{value: price}(totemData.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(2);
+
+        // Now streak should be 29 and we have 2 grace days available
+
+        // Skip exactly 2 days -> uses 1 grace day and increments streak to 30 (no streak-grace yet)
+        warp(2 days);
+        performBoost(userB, totemData.totemAddr);
+        (uint256 streakMid, , ) = boostSystem.getStreakInfo(userB, totemData.totemAddr);
+        assertEq(streakMid, 30, "Streak should reach 30 via grace branch");
+        (, uint256 graceFromStreakMid, , , ) = boostSystem.getGraceDaysInfo(userB, totemData.totemAddr);
+        assertEq(graceFromStreakMid, 0, "No streak-grace awarded yet in grace branch");
+
+        // Skip another 2 days -> late branch awards missing streak grace day
+        warp(2 days);
+        performBoost(userB, totemData.totemAddr);
+        (, uint256 graceFromStreakAfter, , , ) = boostSystem.getGraceDaysInfo(userB, totemData.totemAddr);
+        assertEq(graceFromStreakAfter, 1, "Late branch should award 1 grace day for 30-day streak");
+    }
+
+    function test_Custom2() public {
+        deal(userA, 1000 ether);
+        deal(userB, 1000 ether);
+        deal(userC, 1000 ether);
+
+        prank(deployer);
+        distr.setMaxTotemTokensPerAddress(1e36);
+
+        vm.startPrank(userA);
+        address[] memory myCollabs = new address [](1);
+        myCollabs[0] = userC;
+        astrToken.approve(address(factory), 5e18);
+        factory.createTotem("SimpleTotem", "SIMPLE", "SMPL", myCollabs);
+        vm.stopPrank();
+
+        TF.TotemData memory data = factory.getTotemData(0);
+
+        vm.startPrank(userB);
+        paymentToken.approve(address(distr), paymentToken.balanceOf(userB));
+        distr.buy(data.totemTokenAddr, 699_750_000e18);
+
+        // 27 NORMAL BOOST
+        for(uint i = 1; i < 28; i++){
+            uint boostTimestamp = block.timestamp;
+            uint consecutiveDays = i * 86400;
+            bytes memory signature = createBoostSignature(userB, data.totemAddr, consecutiveDays);
+
+            vm.warp(consecutiveDays);
+            boostSystem.boost(data.totemAddr, consecutiveDays, signature);
+        }
+
+        // FIRST PREMIUM BOOST
+        vm.warp(block.timestamp + 1 days);
+        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(1);
+
+        // SECOND PREMIUM BOOST
+        vm.warp(block.timestamp + 1 days);
+        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(2);
+
+        // SKIP 2 DAYS
+        vm.warp(block.timestamp + 2 days);
+        uint daysBoost2 = block.timestamp;
+        bytes memory signature1001 = createBoostSignature(userB, data.totemAddr, daysBoost2);
+        boostSystem.boost(data.totemAddr, daysBoost2, signature1001);
+
+        // SKIP 2 MORE DAYS
+        vm.warp(block.timestamp + 2 days);
+        uint daysBoost22 = block.timestamp;
+        bytes memory signature10012 = createBoostSignature(userB, data.totemAddr, daysBoost22);
+        boostSystem.boost(data.totemAddr, daysBoost22, signature10012);
+        
+        // SECOND FLOW 
+        
+        // 27 NORMAL BOOST
+        for(uint i = 35; i < 61; i++){
+            uint boostTimestamp = block.timestamp;
+            uint consecutiveDays = i * 86400;
+            bytes memory signature = createBoostSignature(userB, data.totemAddr, consecutiveDays);
+
+            vm.warp(consecutiveDays);
+            boostSystem.boost(data.totemAddr, consecutiveDays, signature);
+        }
+
+        // FIRST PREMIUM BOOST
+        vm.warp(block.timestamp + 1 days);
+        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(3);
+
+        // SECOND PREMIUM BOOST
+        vm.warp(block.timestamp + 1 days);
+        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        mockVRFCoordinator.fulfillRandomWords(4);
+
+        // SKIP 2 DAYS
+        vm.warp(block.timestamp + 2 days);
+        uint daysBoost222 = block.timestamp;
+        bytes memory signature100122 = createBoostSignature(userB, data.totemAddr, daysBoost222);
+        boostSystem.boost(data.totemAddr, daysBoost222, signature100122);
+
+        // SKIP 2 MORE DAYS
+        vm.warp(block.timestamp + 2 days);
+        uint daysBoost2255 = block.timestamp;
+        bytes memory signature10012555 = createBoostSignature(userB, data.totemAddr, daysBoost2255);
+        boostSystem.boost(data.totemAddr, daysBoost2255, signature10012555);
+    }
+
+    function printStreakInfo(address _user, address _totemAddr) public {
+        (uint256 streakDays, uint256 streakMultiplier, uint256 availableGraceDays) = boostSystem.getStreakInfo(_user, _totemAddr);
+        console.log("streakDays", streakDays);
+        console.log("streakMultiplier", streakMultiplier);
+        console.log("availableGraceDays", availableGraceDays);
+        console.log("--------------------------------");
+    }
+
+    function printGraceDaysInfo(address _user, address _totemAddr) public {
+        (uint256 totalGraceDays, uint256 graceDaysFromStreak, uint256 graceDaysFromPremium, uint256 graceDaysWasted, uint256 availableGraceDays) = boostSystem.getGraceDaysInfo(_user, _totemAddr);
+        console.log("totalGraceDays", totalGraceDays);
+        console.log("graceDaysFromStreak", graceDaysFromStreak);
+        console.log("graceDaysFromPremium", graceDaysFromPremium);
+        console.log("graceDaysWasted", graceDaysWasted);
+        console.log("availableGraceDays", availableGraceDays);
+        console.log("--------------------------------");
     }
 }
