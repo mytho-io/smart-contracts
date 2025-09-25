@@ -475,10 +475,6 @@ contract MeritManager is
      * @notice Updates the state of the contract by processing pending periods
      */
     function _updateState() private {
-        uint256 yearIdx = getYearIndex();
-
-        VestingWallet wallet = VestingWallet(payable(vestingWallets[yearIdx]));
-
         uint256 _currentPeriod = currentPeriod();
 
         // Only process completed periods, not the current period
@@ -490,13 +486,17 @@ contract MeritManager is
                 period < _currentPeriod;
                 period++
             ) {
+                uint256 yearIdx = period / slices;
                 releasedMytho[period] =
                     vestingWalletsAllocation[yearIdx] /
                     slices;
                 emit MythoReleased(releasedMytho[period], period);
             }
 
-            wallet.release(mythoToken);
+            for (uint256 walletId; walletId < vestingWallets.length; walletId++) {
+                VestingWallet wallet = VestingWallet(payable(vestingWallets[walletId]));
+                if (wallet.releasable(mythoToken) > 0) wallet.release(mythoToken);
+            }
             lastProcessedPeriod = _currentPeriod;
         }
     }
