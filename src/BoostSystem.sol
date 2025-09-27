@@ -99,6 +99,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         address user;
         address totemAddr;
         uint256 baseReward;
+        uint256 premiumBoostTimestamp;
     }
 
     // Constants - Roles
@@ -312,7 +313,8 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         pendingBoosts[requestId] = PendingBoost({
             user: msg.sender,
             totemAddr: _totemAddr,
-            baseReward: 0 // Will be determined by VRF
+            baseReward: 0, // Will be determined by VRF
+            premiumBoostTimestamp: block.timestamp
         });
 
         emit PremiumBoostPurchased(
@@ -505,7 +507,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
      * @dev Manages streak continuation, grace day consumption, and streak reset logic
      */
     function _updateStreakStartPoint(address _totemAddr) internal {
-        _updateStreakStartPointForUser(msg.sender, _totemAddr);
+        _updateStreakStartPointForUser(msg.sender, _totemAddr, block.timestamp);
     }
 
     /**
@@ -667,15 +669,16 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
      */
     function _updateStreakStartPointForUser(
         address _user,
-        address _totemAddr
+        address _totemAddr,
+        uint256 _timestamp
     ) internal {
         BoostData storage boostData = boosts[_user][_totemAddr];
 
         // If this is the first boost ever, initialize streak
         if (boostData.streakStartPoint == 0) {
-            boostData.streakStartPoint = uint64(block.timestamp);
+            boostData.streakStartPoint = uint64(_timestamp);
             boostData.actualStreakDays = 1;
-            boostData.lastStreakIncrementTimestamp = uint64(block.timestamp);
+            boostData.lastStreakIncrementTimestamp = uint64(_timestamp);
             return;
         }
 
@@ -685,14 +688,14 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
             ? boostData.lastBoostTimestamp
             : boostData.lastPremiumBoostTimestamp;
 
-        if (block.timestamp - lastBoostTime < freeBoostCooldown * 2) {
+        if (_timestamp - lastBoostTime < freeBoostCooldown * 2) {
             // Continue streak - but only increment if 24+ hours passed since last increment
             if (
-                block.timestamp - boostData.lastStreakIncrementTimestamp >=
+                _timestamp - boostData.lastStreakIncrementTimestamp >=
                 freeBoostCooldown
             ) {
                 boostData.actualStreakDays++;
-                boostData.lastStreakIncrementTimestamp = uint64(block.timestamp);
+                boostData.lastStreakIncrementTimestamp = uint64(_timestamp);
 
                 // Check if we should award grace days for reaching 30-day milestones
                 uint256 expectedGraceDaysFromStreak = boostData
@@ -735,7 +738,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         }
 
         // Calculate how many days were skipped (beyond the allowed 2x cooldown)
-        uint256 timeSinceLastBoost = block.timestamp - lastBoostTime;
+        uint256 timeSinceLastBoost = _timestamp - lastBoostTime;
         uint256 allowedGracePeriod = freeBoostCooldown * 2;
 
         if (timeSinceLastBoost >= allowedGracePeriod) {
@@ -759,11 +762,11 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
                 // Grace days preserve streak but do NOT increase it
                 // However, the current boost should still increment the streak if 24+ hours passed since last increment
                 if (
-                    block.timestamp - boostData.lastStreakIncrementTimestamp >=
+                    _timestamp - boostData.lastStreakIncrementTimestamp >=
                     freeBoostCooldown
                 ) {
                     boostData.actualStreakDays++;
-                    boostData.lastStreakIncrementTimestamp = uint64(block.timestamp);
+                    boostData.lastStreakIncrementTimestamp = uint64(_timestamp);
                 }
                 return;
             }
@@ -824,7 +827,8 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         // Update streak system for the user (this should happen in callback, not in premiumBoost)
         _updateStreakStartPointForUser(
             pendingBoost.user,
-            pendingBoost.totemAddr
+            pendingBoost.totemAddr,
+            pendingBoost.premiumBoostTimestamp
         );
 
         // Check for badge achievements after updating streak
