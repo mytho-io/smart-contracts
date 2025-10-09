@@ -21,6 +21,9 @@ minato = "${MINATO_RPC_URL}"
 shibuya = "${SHIBUYA_RPC_URL}"
 soneium = "${SONEIUM_RPC_URL}"
 ethereum = "${ETHEREUM_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
+base = "${BASE_RPC_URL}"
+bnb = "${BNB_RPC_URL}"
 
 [fuzz]
 runs = 1000

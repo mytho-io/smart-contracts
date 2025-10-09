@@ -4,6 +4,27 @@ pragma solidity ^0.8.20;
 import "./Base.t.sol";
 
 contract PostsTest is Base {
+    function test_verifyPostWhileSalePeriod() public {
+        uint256 totemId = createTotem(userA);
+        TF.TotemData memory data = factory.getTotemData(totemId);
+
+        prank(userB);
+        astrToken.approve(address(distr), 250_000 ether);
+        distr.buy(data.totemTokenAddr, 1000 ether);
+
+        uint256 pendingPostId = createPost(userB, totemId);
+        console.log("Post ID:", pendingPostId);
+
+        P.Post memory pendingPost = posts.getPendingPost(pendingPostId);
+        
+        prank(userA);
+        uint256 postId = posts.verifyPost(pendingPostId, true);
+
+        P.Post memory post = posts.getPost(postId);
+        console.log("totemAddr", post.totemAddr);
+        console.log("creator", post.creator);
+    }
+
     function test_Chaos() public {
         uint256 totemId = createTotem(userA);
 

@@ -1450,4 +1450,44 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         // Not enough grace days - streak is broken
         return 0;
     }
+
+    /**
+     * @notice Gets the time remaining until streak reset
+     * @param _user User address
+     * @param _totemAddr Totem address
+     * @return Time in seconds until streak reset (0 if streak is already broken or doesn't exist)
+     */
+    function getTimeUntilStreakReset(
+        address _user,
+        address _totemAddr
+    ) external view returns (uint256) {
+        BoostData storage data = boosts[_user][_totemAddr];
+        
+        // If no streak exists, return 0
+        if (data.streakStartPoint == 0) return 0;
+        
+        // Get the most recent boost time (either free or premium)
+        uint256 lastBoostTime = data.lastBoostTimestamp > data.lastPremiumBoostTimestamp
+            ? data.lastBoostTimestamp 
+            : data.lastPremiumBoostTimestamp;
+        
+        // Base time without streak reset = 2 * freeBoostCooldown (48 hours by default)
+        uint256 allowedTimeWithoutBoost = freeBoostCooldown * 2;
+        uint256 baseResetTime = lastBoostTime + allowedTimeWithoutBoost;
+        
+        // Calculate available grace days
+        uint256 availableGraceDays = data.graceDaysEarned - data.graceDaysWasted;
+        
+        // Each grace day extends the streak by freeBoostCooldown time
+        uint256 graceTimeExtension = availableGraceDays * freeBoostCooldown;
+        uint256 finalResetTime = baseResetTime + graceTimeExtension;
+        
+        // Return remaining time or 0 if already expired
+        if (block.timestamp < finalResetTime) {
+            return finalResetTime - block.timestamp;
+        }
+        
+        // Streak should already be reset
+        return 0;
+    }
 }

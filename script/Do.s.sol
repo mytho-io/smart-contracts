@@ -89,11 +89,9 @@ contract Do is Script {
 
     function run() public {
         fork(minato);
+        address developer = 0x29367D8F3E349E97aD2221242208dF92CF4E2186;
 
-        console.log("merit vesting 1:", mytho.meritVestingYear1());
-        console.log("merit vesting 2:", mytho.meritVestingYear2());
-        console.log("merit vesting 3:", mytho.meritVestingYear3());
-        console.log("merit vesting 4:", mytho.meritVestingYear4());
+        console.log(developer.balance);
     }
 
     function fork(uint256 _forkId) internal {

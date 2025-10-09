@@ -15,7 +15,7 @@ contract ComplexTest is Base {
         paymentToken2.mint(userB, 1_000_000_000 ether);
 
         vm.startPrank(userA);
-        address[] memory myCollabs = new address [](1);
+        address[] memory myCollabs = new address[](1);
         myCollabs[0] = userB;
 
         astrToken.approve(address(factory), 5e18);
@@ -38,7 +38,7 @@ contract ComplexTest is Base {
         vm.startPrank(userB);
         paymentToken2.approve(address(distr), paymentToken2.balanceOf(userB));
         distr.buy(data.totemTokenAddr, 199_750_000e18);
-        vm.stopPrank();        
+        vm.stopPrank();
     }
 
     // Test totem creation and initial token distribution
@@ -52,7 +52,7 @@ contract ComplexTest is Base {
         vm.recordLogs();
         createTotemWithAddrInReturn(userA);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        ( , , , , uint256 id) = abi.decode(
+        (, , , , uint256 id) = abi.decode(
             logs[logs.length - 1].data,
             (bytes, address, address, address, uint256)
         );
@@ -164,35 +164,38 @@ contract ComplexTest is Base {
     function test_TotemCreating_NFTToken() public {
         // Create a mock NFT
         MockERC721 nftToken = new MockERC721();
-        
+
         // Mint some NFTs to users
         nftToken.mint(userA, 1);
         nftToken.mint(userB, 2);
         nftToken.mint(userC, 3);
 
         vm.deal(userA, 1 ether);
-        
+
         // Authorize userA to create a totem with the NFT token
         prank(deployer);
         address[] memory usersToAuthorize = new address[](1);
         usersToAuthorize[0] = userA;
         factory.authorizeUsers(address(nftToken), usersToAuthorize);
-        
+
         // Get initial treasury balance
         uint256 initTreasuryBalanceInFeeTokens = IERC20(factory.getFeeToken())
             .balanceOf(address(treasury));
-            
+
         // Approve fee token for totem creation
         prank(userA);
         IERC20(factory.getFeeToken()).approve(
             address(factory),
             factory.getCreationFee()
         );
-        
+
         // Create totem with NFT token
         vm.mockCall(
             address(holdersOracle),
-            abi.encodeWithSelector(TokenHoldersOracle.requestNFTCount.selector, address(nftToken)),
+            abi.encodeWithSelector(
+                TokenHoldersOracle.requestNFTCount.selector,
+                address(nftToken)
+            ),
             abi.encode(0)
         );
 
@@ -201,32 +204,32 @@ contract ComplexTest is Base {
             address(nftToken),
             new address[](0)
         );
-        
+
         // Verify totem was created
         assertEq(factory.getLastId(), 1);
         assertEq(
             IERC20(factory.getFeeToken()).balanceOf(address(treasury)),
             initTreasuryBalanceInFeeTokens + factory.getCreationFee()
         );
-        
+
         // Get totem data
         TF.TotemData memory data = factory.getTotemData(0);
         assertEq(uint(data.tokenType), uint(TF.TokenType.ERC721));
         assertEq(data.totemTokenAddr, address(nftToken));
         assertEq(data.creator, userA);
-        
+
         // Get totem instance
         Totem totem = Totem(data.totemAddr);
-        
+
         // Manually update nft count in oracle (simulating Chainlink Functions response)
         prank(deployer);
         holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3); // 3 NFT holders
-        
+
         // Test getCirculatingSupply for NFT
         prank(userA);
         uint256 circulatingSupply = totem.getCirculatingSupply();
         assertEq(circulatingSupply, 3); // Should be equal to number of NFT holders
-        
+
         // Test redeeming NFT tokens
         // First, we need to end the sale period
         prank(deployer);
@@ -234,9 +237,14 @@ contract ComplexTest is Base {
         address distributorAddr = registry.getTotemTokenDistributor();
         // Use the distributor to call endSalePeriod
         prank(distributorAddr);
-        Totem totemContract = Totem(factory.getTotemData(factory.getLastId() - 1).totemAddr);
-        totemContract.endSalePeriod(IERC20(address(paymentToken)), IERC20(address(0)));
-        
+        Totem totemContract = Totem(
+            factory.getTotemData(factory.getLastId() - 1).totemAddr
+        );
+        totemContract.endSalePeriod(
+            IERC20(address(paymentToken)),
+            IERC20(address(0))
+        );
+
         // Verify that the sale period has ended
         assertTrue(totemContract.isSalePeriodEnded());
 
@@ -245,8 +253,8 @@ contract ComplexTest is Base {
 
         vm.warp(60 days);
 
-        holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3);        
-        
+        holdersOracle.manuallyUpdateNFTCount(address(nftToken), 3);
+
         // Now redeem tokens as userA (who holds NFT)
         prank(userA);
         totem.collectMYTH(mm.currentPeriod() - 1);
@@ -255,7 +263,7 @@ contract ComplexTest is Base {
 
         circulatingSupply = totem.getCirculatingSupply();
         assertEq(circulatingSupply, 2);
-        
+
         // Verify user received proportional assets
         // Since there are 3 NFT holders, each should get 1/3 of the rewards
         uint256 mythoBalance = mytho.balanceOf(userA);
@@ -1206,7 +1214,6 @@ contract ComplexTest is Base {
                 mythumStart == expectedStart - 1
         );
     }
-    
 
     // Test merit crediting and claiming across period duration changes
     function test_MeritAndClaimAcrossPeriodChanges() public {
@@ -1749,16 +1756,12 @@ contract ComplexTest is Base {
         // Test updateNFTHoldersCount with insufficient fee
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTCount{value: 0.0001 ether}(
-            address(nftToken)
-        );
+        testOracle.updateNFTCount{value: 0.0001 ether}(address(nftToken));
 
         // Test updateNFTCount with non-NFT token
         prank(userA);
         vm.expectRevert();
-        testOracle.updateNFTCount{value: 0.001 ether}(
-            address(paymentToken)
-        );
+        testOracle.updateNFTCount{value: 0.001 ether}(address(paymentToken));
 
         // Test updateNFTCount with no NFT balance
         prank(userD); // userD has no NFTs
@@ -1797,7 +1800,7 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
@@ -1827,7 +1830,7 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
@@ -1838,12 +1841,16 @@ contract ComplexTest is Base {
 
         // Try to withdraw with unauthorized user
         prank(userA);
-        vm.expectRevert(abi.encodeWithSelector(Totem.NotMultisigWallet.selector));
+        vm.expectRevert(
+            abi.encodeWithSelector(Totem.NotMultisigWallet.selector)
+        );
         totem.withdrawToken(address(testToken), userB, 500 ether);
 
         // Try to withdraw with another unauthorized user
         prank(userB);
-        vm.expectRevert(abi.encodeWithSelector(Totem.NotMultisigWallet.selector));
+        vm.expectRevert(
+            abi.encodeWithSelector(Totem.NotMultisigWallet.selector)
+        );
         totem.withdrawToken(address(testToken), userB, 500 ether);
     }
 
@@ -1855,7 +1862,7 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
@@ -1887,7 +1894,7 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
@@ -1898,7 +1905,9 @@ contract ComplexTest is Base {
 
         // Try to withdraw more than available
         prank(multisigWallet);
-        vm.expectRevert(abi.encodeWithSelector(Totem.InsufficientTotemBalance.selector));
+        vm.expectRevert(
+            abi.encodeWithSelector(Totem.InsufficientTotemBalance.selector)
+        );
         totem.withdrawToken(address(testToken), userB, 500 ether);
     }
 
@@ -1910,7 +1919,7 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
@@ -1936,12 +1945,12 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
 
-        // Grant REGISTRATOR role to deployer and register totem 
+        // Grant REGISTRATOR role to deployer and register totem
         prank(deployer);
         mm.grantRole(mm.REGISTRATOR(), deployer);
         mm.register(address(totem));
@@ -1949,7 +1958,7 @@ contract ComplexTest is Base {
         // Credit merit to the totem which will mint MYTHO tokens
         prank(deployer);
         mm.creditMerit(address(totem), 1000 ether);
-        
+
         // Move to next period and claim tokens to get MYTHO in the totem
         warp(mm.periodDuration() + 1);
         prank(address(totem));
@@ -1979,7 +1988,7 @@ contract ComplexTest is Base {
 
         // Create a mock multisig wallet address
         address multisigWallet = makeAddr("multisigWallet");
-        
+
         // Set the multisig wallet in the registry
         prank(deployer);
         registry.setAddress(bytes32("MULTISIG_WALLET"), multisigWallet);
