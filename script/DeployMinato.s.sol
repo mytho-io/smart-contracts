@@ -148,7 +148,7 @@ contract DeployMinato is Script {
             deployer,
             ""
         );
-        distr = TTD(address(distrProxy));
+        distr = TTD(payable(address(distrProxy)));
         distr.initialize(address(registry));
 
         registry.setAddress(bytes32("TOTEM_TOKEN_DISTRIBUTOR"), address(distr));
