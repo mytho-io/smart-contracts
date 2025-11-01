@@ -27,6 +27,7 @@ contract AddressRegistry is AccessControlUpgradeable {
     bytes32 private constant BOOST_SYSTEM = "BOOST_SYSTEM";
     bytes32 private constant BADGE_NFT = "BADGE_NFT";
     bytes32 private constant MULTISIG_WALLET = "MULTISIG_WALLET";
+    bytes32 private constant WBNB = "WBNB";
 
     // Events
     event AddressSet(bytes32 indexed id, address oldAddress, address newAddress); // prettier-ignore
@@ -173,6 +174,14 @@ contract AddressRegistry is AccessControlUpgradeable {
      */
     function getMultisigWallet() external view returns (address) {
         return getAddress(MULTISIG_WALLET);
+    }
+
+    /**
+     * @notice Gets the address of the WBNB contract
+     * @return Address of the WBNB contract
+     */
+    function getWBNB() external view returns (address) {
+        return getAddress(WBNB);
     }
 
     /**

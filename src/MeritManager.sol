@@ -45,10 +45,8 @@ contract MeritManager is
 
     // Mappings
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
-    mapping(uint256 period => mapping(address totemAddress => uint256 points))
-        public totemMerit; // Merit points for each totem per period
-    mapping(uint256 period => mapping(address totemAddr => bool claimed))
-        public isClaimed; // Whether rewards have been claimed for a period by a specific totem
+    mapping(uint256 period => mapping(address totemAddress => uint256 points)) public totemMerit; // Merit points for each totem per period
+    mapping(uint256 period => mapping(address totemAddr => bool claimed)) public isClaimed; // Whether rewards have been claimed for a period by a specific totem
     mapping(uint256 period => uint256 releasedMytho) public releasedMytho; // Total MYTHO released per period
     mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Deprecated, remained for layout consistency
     mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Deprecated, remained for layout consistency
@@ -66,29 +64,15 @@ contract MeritManager is
     // Events
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
-    event MeritCredited(
-        address indexed totem,
-        uint256 amount,
-        uint256 period,
-        address indexed who,
-        string indexed source
-    );
+    event MeritCredited(address indexed totem, uint256 amount, uint256 period, address indexed who, string indexed source); // prettier-ignore
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
     event StartTimeSet(uint256 startTime);
     event PostRewardUpdated(uint256 amount); // prettier-ignore
     event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
-    event DonationTooSmallForMerit(
-        address indexed totem,
-        uint256 donationAmount,
-        uint256 minimumRequired
-    );
-    event DonationRewarded(
-        address indexed who,
-        address indexed totemAddr,
-        uint256 meritPoints
-    );
+    event DonationTooSmallForMerit(address indexed totem, uint256 donationAmount, uint256 minimumRequired); // prettier-ignore
+    event DonationRewarded(address indexed who, address indexed totemAddr, uint256 meritPoints); // prettier-ignore
 
     // Custom errors
     error TotemNotRegistered();

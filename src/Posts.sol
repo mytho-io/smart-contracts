@@ -201,7 +201,7 @@ contract Posts is
 
         // Check if caller is authorized
         bool isAutoApproved = msg.sender == totemData.creator ||
-            _isCollaborator(Totem(totemData.totemAddr), msg.sender);
+            _isCollaborator(Totem(payable(totemData.totemAddr)), msg.sender);
 
         uint256 id;
         Post storage post;
@@ -269,7 +269,7 @@ contract Posts is
         if (!isValidNewMapping && !isValidOldMapping)
             revert PostAlreadyVerified();
 
-        Totem totem = Totem(pendingPost.totemAddr);
+        Totem totem = Totem(payable(pendingPost.totemAddr));
 
         // Check if caller is authorized
         if (
@@ -330,7 +330,7 @@ contract Posts is
             revert BoostWindowClosed();
 
         // Get totem and token information
-        Totem totem = Totem(post.totemAddr);
+        Totem totem = Totem(payable(post.totemAddr));
         (address totemTokenAddr, , ) = totem.getTokenAddresses();
 
         // Get token type from factory
@@ -571,7 +571,7 @@ contract Posts is
         uint256 boostAmount = boosts[_postId][_user];
         if (boostAmount == 0) revert BoostNotFound();
 
-        Totem totem = Totem(post.totemAddr);
+        Totem totem = Totem(payable(post.totemAddr));
         (address totemTokenAddr, , ) = totem.getTokenAddresses();
 
         // Get token type from factory

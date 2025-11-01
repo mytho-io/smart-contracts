@@ -173,7 +173,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         minTotemTokensAmountForBoost = 1e18;
         freeBoostCooldown = 1 days;
         boostRewardPoints = 100; // 100 merit points for boost
-        premiumBoostPrice = 0.00003 ether; // Base price of premium boost
+        premiumBoostPrice = 0.009 ether; // Base price of premium boost
         premiumBoostGracePeriod = 24 hours; // Default period for premium boost grace days
         signatureValidityWindow = 5 minutes; // Default signature validity window
 

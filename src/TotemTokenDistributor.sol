@@ -6,6 +6,7 @@ import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/acce
 import {PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {AggregatorV3Interface} from "@chainlink/local/src/data-feeds/interfaces/AggregatorV3Interface.sol";
 
@@ -17,6 +18,7 @@ import {AddressRegistry} from "./AddressRegistry.sol";
 
 import {IUniswapV2Router02} from "./interfaces/IUniswapV2Router02.sol";
 import {IUniswapV2Factory} from "./interfaces/IUniswapV2Factory.sol";
+import {IWBNB} from "./interfaces/IWBNB.sol";
 
 /**
  * @title TotemTokenDistributor
@@ -110,6 +112,7 @@ contract TotemTokenDistributor is
     error LiquidityAdditionFailed();
     error UniswapRouterNotSet();
     error EcosystemPaused();
+    error OnlyWBNB();
 
     /**
      * @notice Initializes the TotemTokenDistributor contract
@@ -142,6 +145,11 @@ contract TotemTokenDistributor is
     }
 
     // EXTERNAL FUNCTIONS
+
+    /**
+     * @notice Required for receiving native tokens from WBNB
+     */
+    receive() external payable {}
 
     /**
      * @notice Being called by TotemFactory during totem creation
@@ -187,7 +195,7 @@ contract TotemTokenDistributor is
     function buy(
         address _totemTokenAddr,
         uint256 _totemTokenAmount
-    ) external whenNotPaused {
+    ) external payable whenNotPaused {
         if (!totems[_totemTokenAddr].registered)
             revert UnknownTotemToken(_totemTokenAddr);
         if (!totems[_totemTokenAddr].isSalePeriod)
@@ -210,9 +218,30 @@ contract TotemTokenDistributor is
             _totemTokenAmount
         );
 
+        AddressRegistry registry = AddressRegistry(registryAddr);
+
         // check if user has enough payment tokens
-        if (IERC20(totemPaymentToken).balanceOf(msg.sender) < paymentTokenAmount)
-            revert WrongPaymentTokenAmount(paymentTokenAmount);
+        if (totemPaymentToken != registry.getWBNB()) {
+            // send back bnb if payment token isnt wbnb
+            if (msg.value > 0)
+                Address.sendValue(payable(msg.sender), msg.value);
+
+            if (
+                IERC20(totemPaymentToken).balanceOf(msg.sender) <
+                paymentTokenAmount
+            ) revert WrongPaymentTokenAmount(paymentTokenAmount);
+        } else {
+            if (msg.value < paymentTokenAmount)
+                revert WrongPaymentTokenAmount(paymentTokenAmount);
+            if (msg.value > paymentTokenAmount)
+                Address.sendValue(
+                    payable(msg.sender),
+                    msg.value - paymentTokenAmount
+                );
+
+            // convert native bnb to wbnb
+            IWBNB(registry.getWBNB()).deposit{value: paymentTokenAmount}();
+        }
 
         // update totems payment token amount
         totems[_totemTokenAddr].collectedPaymentTokens += paymentTokenAmount;
@@ -224,12 +253,15 @@ contract TotemTokenDistributor is
         position.paymentTokenAmount += paymentTokenAmount;
         position.totemTokenAmount += _totemTokenAmount;
 
-        // Transfer tokens using SafeERC20
-        IERC20(totemPaymentToken).safeTransferFrom(
-            msg.sender,
-            address(this),
-            paymentTokenAmount
-        );
+        if (totemPaymentToken != registry.getWBNB()) {
+            // Transfer tokens using SafeERC20
+            IERC20(totemPaymentToken).safeTransferFrom(
+                msg.sender,
+                address(this),
+                paymentTokenAmount
+            );
+        }
+
         IERC20(_totemTokenAddr).safeTransfer(msg.sender, _totemTokenAmount);
 
         emit TotemTokensBought(
@@ -293,7 +325,19 @@ contract TotemTokenDistributor is
             address(this),
             _totemTokenAmount
         );
-        IERC20(_paymentTokenAddr).safeTransfer(msg.sender, paymentTokensBack);
+
+        // send native tokens to user if payment token is wbnb and erc20 if not
+        if (_paymentTokenAddr == AddressRegistry(registryAddr).getWBNB()) {
+            IWBNB(AddressRegistry(registryAddr).getWBNB()).withdraw(
+                paymentTokensBack
+            );
+            Address.sendValue(payable(msg.sender), paymentTokensBack);
+        } else {
+            IERC20(_paymentTokenAddr).safeTransfer(
+                msg.sender,
+                paymentTokensBack
+            );
+        }
 
         emit TotemTokensSold(
             msg.sender,
@@ -459,15 +503,32 @@ contract TotemTokenDistributor is
         // calculate revenue share
         uint256 revenueShare = (paymentTokenAmount * revenuePaymentTokenShare) /
             PRECISION;
-        IERC20(_paymentTokenAddr).safeTransfer(treasuryAddr, revenueShare);
 
         // calculate totem creator share
         uint256 creatorShare = (paymentTokenAmount *
             totemCreatorPaymentTokenShare) / PRECISION;
-        IERC20(_paymentTokenAddr).safeTransfer(
-            totems[_totemTokenAddr].creator,
-            creatorShare
-        );
+
+        IWBNB wbnb = IWBNB(AddressRegistry(registryAddr).getWBNB());
+
+        // send native tokens if payment token is wbnb
+        if (_paymentTokenAddr == address(wbnb)) {
+            wbnb.withdraw(creatorShare + revenueShare);
+            // send bnb to creator
+            Address.sendValue(
+                payable(totems[_totemTokenAddr].creator),
+                creatorShare
+            );
+            // send bnb to treasury
+            Address.sendValue(payable(treasuryAddr), revenueShare);
+        } else {
+            // send erc20 tokens to creator
+            IERC20(_paymentTokenAddr).safeTransfer(
+                totems[_totemTokenAddr].creator,
+                creatorShare
+            );
+            // send erc20 tokens to treasury
+            IERC20(_paymentTokenAddr).safeTransfer(treasuryAddr, revenueShare);
+        }
 
         // calculate totem vault share
         uint256 vaultShare = (paymentTokenAmount * vaultPaymentTokenShare) /
@@ -490,7 +551,7 @@ contract TotemTokenDistributor is
         );
 
         // set payment token for Totem and close sale period
-        Totem(totems[_totemTokenAddr].totemAddr).endSalePeriod(
+        Totem(payable(totems[_totemTokenAddr].totemAddr)).endSalePeriod(
             IERC20(_paymentTokenAddr),
             IERC20(liquidityToken)
         );
@@ -535,8 +596,10 @@ contract TotemTokenDistributor is
         );
 
         // Calculate minimum amounts based on slippage percentage
-        uint256 minTotemAmount = (_totemTokenAmount * (PRECISION - slippagePercentage)) / PRECISION;
-        uint256 minPaymentAmount = (_paymentTokenAmount * (PRECISION - slippagePercentage)) / PRECISION;
+        uint256 minTotemAmount = (_totemTokenAmount *
+            (PRECISION - slippagePercentage)) / PRECISION;
+        uint256 minPaymentAmount = (_paymentTokenAmount *
+            (PRECISION - slippagePercentage)) / PRECISION;
 
         // Add liquidity
         (, , liquidity) = router.addLiquidity(
@@ -778,7 +841,9 @@ contract TotemTokenDistributor is
      * @param _totemTokenAddr Address of the totem token
      * @return Boolean indicating if the totem is registered
      */
-    function isTotemRegistered(address _totemTokenAddr) external view returns (bool) {
+    function isTotemRegistered(
+        address _totemTokenAddr
+    ) external view returns (bool) {
         return totems[_totemTokenAddr].registered;
     }
 
