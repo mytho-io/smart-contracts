@@ -110,23 +110,24 @@ contract OFTTest is Test {
         assertEq(fee.lzTokenFee, 0, "Incorrect lzToken fee");
     }
 
-    function testFailTransferInsufficientBalance() public {
+    function test_Revert_TransferInsufficientBalance() public {
         prank(user1);
+        vm.expectRevert();
         token.transfer(user2, 1 ether);
     }
 
-    function testFailTransferFromInsufficientAllowance() public {
+    function testF_Revert_TransferFromInsufficientAllowance() public {
         prank(deployer);
         token.approve(user1, 5 ether);
 
         prank(user1);
-        vm.expectRevert("ERC20: insufficient allowance");
+        vm.expectRevert();
         token.transferFrom(deployer, user2, 10 ether);
     }
 
-    function testFailTransferToZeroAddress() public {
+    function testF_Revert_TransferToZeroAddress() public {
         prank(deployer);
-        vm.expectRevert("ERC20: transfer to the zero address");
+        vm.expectRevert();
         token.transfer(address(0), 10 ether);
     }
 

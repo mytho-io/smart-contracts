@@ -7,7 +7,6 @@ import "forge-std/console.sol";
 import {TokenHoldersOracle} from "../src/utils/TokenHoldersOracle.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {FunctionsRouter} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsRouter.sol";
 
 // Mock ERC721 contract for testing
 contract MockERC721 is ERC721 {

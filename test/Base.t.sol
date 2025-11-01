@@ -375,6 +375,7 @@ contract Base is Test {
         registry.setAddress(bytes32("MERIT_MANAGER"), address(mm));
         registry.setAddress(bytes32("MYTHO_TOKEN"), address(mytho));
         registry.setAddress(bytes32("MYTHO_TREASURY"), address(treasury));
+        registry.setAddress(bytes32("WBNB"), address(weth));
 
         uint256[4] memory vestingAllocations;
         vestingAllocations[0] = 8_000_000 ether;
@@ -391,7 +392,7 @@ contract Base is Test {
             deployer,
             ""
         );
-        distr = TTD(address(distrProxy));
+        distr = TTD(payable(address(distrProxy)));
         distr.initialize(address(registry));
 
         registry.setAddress(bytes32("TOTEM_TOKEN_DISTRIBUTOR"), address(distr));

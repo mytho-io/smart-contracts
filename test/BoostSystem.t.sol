@@ -30,7 +30,7 @@ contract BoostSystemTest is Base {
         for(uint i = 1; i < 4; i++){
             uint consecutiveDays = i * 86400;
             vm.warp(consecutiveDays);
-            boostSystem.premiumBoost{value: 0.00003 ether}
+            boostSystem.premiumBoost{value: 0.009 ether}
             (data.totemAddr);
             mockVRFCoordinator.fulfillRandomWords(i);
         }
@@ -50,7 +50,7 @@ contract BoostSystemTest is Base {
         warp(1 hours + 48 hours);
 
         vm.startPrank(userB);
-        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        boostSystem.premiumBoost{value: 0.009 ether}(data.totemAddr);
         mockVRFCoordinator.fulfillRandomWords(4);
         vm.stopPrank();
 
@@ -2174,12 +2174,12 @@ contract BoostSystemTest is Base {
 
         // FIRST PREMIUM BOOST
         vm.warp(block.timestamp + 1 days);
-        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        boostSystem.premiumBoost{value: 0.009 ether}(data.totemAddr);
         mockVRFCoordinator.fulfillRandomWords(1);
 
         // SECOND PREMIUM BOOST
         vm.warp(block.timestamp + 1 days);
-        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        boostSystem.premiumBoost{value: 0.009 ether}(data.totemAddr);
         mockVRFCoordinator.fulfillRandomWords(2);
 
         // SKIP 2 DAYS
@@ -2208,12 +2208,12 @@ contract BoostSystemTest is Base {
 
         // FIRST PREMIUM BOOST
         vm.warp(block.timestamp + 1 days);
-        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        boostSystem.premiumBoost{value: 0.009 ether}(data.totemAddr);
         mockVRFCoordinator.fulfillRandomWords(3);
 
         // SECOND PREMIUM BOOST
         vm.warp(block.timestamp + 1 days);
-        boostSystem.premiumBoost{value: 0.00003 ether}(data.totemAddr);
+        boostSystem.premiumBoost{value: 0.009 ether}(data.totemAddr);
         mockVRFCoordinator.fulfillRandomWords(4);
 
         // SKIP 2 DAYS

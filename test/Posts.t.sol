@@ -30,7 +30,7 @@ contract PostsTest is Base {
 
         TF.TotemData memory data = factory.getTotemData(totemId);
         assertEq(data.creator, userA);
-        assertTrue(data.totemAddr != address(0));
+        assertTrue(payable(data.totemAddr) != address(0));
         assertFalse(uint8(data.tokenType) != uint8(TF.TokenType.STANDARD));
 
         // Buy totem tokens by userB
@@ -44,13 +44,13 @@ contract PostsTest is Base {
         assertEq(token.balanceOf(userB), 5_000_000 ether);
         assertEq(token.balanceOf(userA), 250_000 ether);
         assertEq(token.balanceOf(address(distr)), 0);
-        assertEq(token.balanceOf(data.totemAddr), 100_000_000 ether);
-        assertTrue(mm.isRegisteredTotem(data.totemAddr));
-        assertFalse(mm.isBlacklisted(data.totemAddr));
+        assertEq(token.balanceOf(payable(data.totemAddr)), 100_000_000 ether);
+        assertTrue(mm.isRegisteredTotem(payable(data.totemAddr)));
+        assertFalse(mm.isBlacklisted(payable(data.totemAddr)));
 
         // check who is owner
-        assertTrue(Totem(data.totemAddr).getOwner() == userA);
-        assertFalse(Totem(data.totemAddr).getOwner() == userB);
+        assertTrue(Totem(payable(data.totemAddr)).getOwner() == userA);
+        assertFalse(Totem(payable(data.totemAddr)).getOwner() == userB);
 
         // now userA has 250_000 totem tokens
         // now userB has 5_000_000 totem tokens
@@ -68,7 +68,7 @@ contract PostsTest is Base {
         // check post info
         P.Post memory post = posts.getPost(postId);
         assertEq(post.creator, userA);
-        assertEq(post.totemAddr, data.totemAddr);
+        assertEq(post.totemAddr, payable(data.totemAddr));
         assertEq(post.createdAt, uint32(block.timestamp));
         assertEq(post.totalBoostedTokens, 0);
 
@@ -118,10 +118,10 @@ contract PostsTest is Base {
         // check pending post info
         P.Post memory pendingPost = posts.getPendingPost(pendingPostId);
         assertEq(pendingPost.creator, userB);
-        assertEq(pendingPost.totemAddr, data.totemAddr);
+        assertEq(pendingPost.totemAddr, payable(data.totemAddr));
         assertEq(pendingPost.createdAt, uint32(block.timestamp));
         assertEq(pendingPost.totalBoostedTokens, 0);
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), 1);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), 1);
 
         assertEq(posts.postCounter(), 2);
         assertEq(posts.pendingPostCounter(), 2);
@@ -131,13 +131,13 @@ contract PostsTest is Base {
         uint256 newPostId = posts.verifyPost(1, true);
         assertEq(posts.postCounter(), 3);
         assertEq(newPostId, 2);
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), 0);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), 0);
 
         post = posts.getPost(2);
         assertEq(post.creator, userB);
-        assertEq(post.totemAddr, data.totemAddr);
+        assertEq(post.totemAddr, payable(data.totemAddr));
         assertEq(posts.ownerOf(newPostId), userB);
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), 0); // Pending post cleared
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), 0); // Pending post cleared
 
         // Verify royalty settings
         (address receiver, uint256 amount) = posts.royaltyInfo(newPostId, 100 ether);
@@ -153,7 +153,7 @@ contract PostsTest is Base {
         uint256 postId = createPost(userA, totemId);
         P.Post memory post = posts.getPost(postId);
         assertEq(post.creator, userA);
-        assertEq(post.totemAddr, data.totemAddr);
+        assertEq(post.totemAddr, payable(data.totemAddr));
         assertEq(post.createdAt, uint32(block.timestamp));
         assertEq(post.totalBoostedTokens, 0);
         assertEq(posts.ownerOf(postId), userA);
@@ -161,7 +161,7 @@ contract PostsTest is Base {
         // Test pending post creation (userD has no tokens)
         prank(userD);
         vm.expectRevert(P.NotEnoughTotemTokens.selector);
-        posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
 
         // Test invalid totem
         prank(userA);
@@ -186,10 +186,10 @@ contract PostsTest is Base {
         // Verify post info
         P.Post memory pendingPost = posts.getPendingPost(pendingPostId);
         assertEq(pendingPost.creator, userB);
-        assertEq(pendingPost.totemAddr, data.totemAddr);
+        assertEq(pendingPost.totemAddr, payable(data.totemAddr));
         assertEq(pendingPost.createdAt, uint32(block.timestamp));
         assertEq(pendingPost.totalBoostedTokens, 0);
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), pendingPostId);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), pendingPostId);
 
         // Test verification by non-owner/collaborator
         prank(userC);
@@ -197,16 +197,16 @@ contract PostsTest is Base {
         posts.verifyPost(pendingPostId, true);
 
         // Test verification by owner when totem is not registered in Merit Manager
-        assertFalse(mm.isRegisteredTotem(data.totemAddr), "Totem should not be registered yet");
+        assertFalse(mm.isRegisteredTotem(payable(data.totemAddr)), "Totem should not be registered yet");
         prank(userA);
         uint256 newPostId = posts.verifyPost(pendingPostId, true);
 
         // Check post was created properly
         P.Post memory post = posts.getPost(newPostId);
         assertEq(post.creator, userB);
-        assertEq(post.totemAddr, data.totemAddr);
+        assertEq(post.totemAddr, payable(data.totemAddr));
         assertEq(posts.ownerOf(newPostId), userB);
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), 0); // Pending post cleared
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), 0); // Pending post cleared
 
         // Verify royalty settings
         (address receiver, uint256 amount) = posts.royaltyInfo(newPostId, 100 ether);
@@ -215,7 +215,7 @@ contract PostsTest is Base {
 
         // Complete token sale to register totem in Merit Manager
         buyAllTotemTokens(data.totemTokenAddr);
-        assertTrue(mm.isRegisteredTotem(data.totemAddr), "Totem should be registered after token sale");
+        assertTrue(mm.isRegisteredTotem(payable(data.totemAddr)), "Totem should be registered after token sale");
 
         // Create and verify another post - this time Merit Manager reward should be given
         uint256 pendingPostId2 = createPost(userB, totemId);
@@ -227,7 +227,7 @@ contract PostsTest is Base {
         uint256 pendingPostId3 = createPost(userB, totemId);
         prank(userA);
         posts.verifyPost(pendingPostId3, false);
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), 0);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), 0);
     }
 
     function test_PostBoosting() public {
@@ -363,7 +363,7 @@ contract PostsTest is Base {
         buyAllTotemTokens(data.totemTokenAddr);
 
         // Get totems merit points
-        uint256 totemMerit = mm.getTotemMeritPoints(data.totemAddr, 0);
+        uint256 totemMerit = mm.getTotemMeritPoints(payable(data.totemAddr), 0);
         console.log("totemMerit", totemMerit);
 
         // Test small amount of donation
@@ -375,7 +375,7 @@ contract PostsTest is Base {
         posts.donateToPost{value: donationAmount}(postId);
 
         // Get totems merit points
-        totemMerit = mm.getTotemMeritPoints(data.totemAddr, 0);
+        totemMerit = mm.getTotemMeritPoints(payable(data.totemAddr), 0);
         console.log("totemMerit", totemMerit);
     }
 
@@ -440,7 +440,7 @@ contract PostsTest is Base {
         // Test operations while paused
         prank(userA);
         vm.expectRevert();
-        posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
 
         // Test unpausing by manager
         prank(deployer);
@@ -476,7 +476,7 @@ contract PostsTest is Base {
         // Attempt to create post with insufficient tokens should fail
         prank(userB);
         vm.expectRevert(P.NotEnoughTotemTokens.selector);
-        posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         
         // Give userB enough tokens
         prank(userA);
@@ -487,10 +487,10 @@ contract PostsTest is Base {
         
         // Should now be able to create post (will be pending since userB is not creator)
         prank(userB);
-        uint256 postId = posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        uint256 postId = posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         
         // Verify pending post was created (userB is not the totem creator, so gets pending post)
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), postId);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), postId);
     }
 
     function test_MeritManagerRewards() public {
@@ -501,11 +501,11 @@ contract PostsTest is Base {
         buyAllTotemTokens(data.totemTokenAddr);
         
         // Verify totem is registered in Merit Manager
-        assertTrue(mm.isRegisteredTotem(data.totemAddr));
+        assertTrue(mm.isRegisteredTotem(payable(data.totemAddr)));
         
         // Create post and verify it's successful
         prank(userA);
-        uint256 postId = posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        uint256 postId = posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         assertEq(posts.ownerOf(postId), userA);
         
         // Test donation reward
@@ -559,7 +559,7 @@ contract PostsTest is Base {
         assertEq(data.totemTokenAddr, address(nftToken));
         
         // Create post
-        uint256 postId = createPostWithTotem(userA, data.totemAddr);
+        uint256 postId = createPostWithTotem(userA, payable(data.totemAddr));
         
         // Test NFT boosting - userB boosts with NFT tokenId 2
         prank(userB);
@@ -649,7 +649,7 @@ contract PostsTest is Base {
         TF.TotemData memory data = factory.getTotemData(factory.getLastId() - 1);
         
         // Create post
-        uint256 postId = createPostWithTotem(userA, data.totemAddr);
+        uint256 postId = createPostWithTotem(userA, payable(data.totemAddr));
         
         // Test boosting up to the limit (50 NFTs)
         prank(userA);
@@ -706,7 +706,7 @@ contract PostsTest is Base {
         // Complete token sale to make tokens available
         buyAllTotemTokens(data.totemTokenAddr);
         
-        uint256 postId = createPostWithTotem(userA, data.totemAddr);
+        uint256 postId = createPostWithTotem(userA, payable(data.totemAddr));
         
         // UserB boosts the post with totem tokens
         prank(userB);
@@ -770,7 +770,7 @@ contract PostsTest is Base {
         // Give userA NFT to create post (since it's NFT totem)
         nftToken.mint(userA, 2);
         
-        uint256 postId = createPostWithTotem(userA, data.totemAddr);
+        uint256 postId = createPostWithTotem(userA, payable(data.totemAddr));
         
         // UserB boosts with NFT
         prank(userB);
@@ -819,7 +819,7 @@ contract PostsTest is Base {
         // Complete token sale to make tokens available
         buyAllTotemTokens(data.totemTokenAddr);
         
-        uint256 postId = createPostWithTotem(userA, data.totemAddr);
+        uint256 postId = createPostWithTotem(userA, payable(data.totemAddr));
         
         // UserB boosts the post with totem tokens
         prank(userB);
@@ -848,11 +848,11 @@ contract PostsTest is Base {
         TF.TotemData memory data = factory.getTotemData(totemId);
         
         // Verify totem is NOT registered in Merit Manager
-        assertFalse(mm.isRegisteredTotem(data.totemAddr));
+        assertFalse(mm.isRegisteredTotem(payable(data.totemAddr)));
         
         // Create post and verify it's successful even without Merit Manager registration
         prank(userA);
-        uint256 postId = posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        uint256 postId = posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         assertEq(posts.ownerOf(postId), userA);
         
         // Test donation still works for unregistered totems
@@ -875,7 +875,7 @@ contract PostsTest is Base {
         
         // Create post with custom metadata
         prank(userA);
-        uint256 postId = posts.createPost(data.totemAddr, metadataHash);
+        uint256 postId = posts.createPost(payable(data.totemAddr), metadataHash);
         
         // Verify metadata hash is stored correctly
         bytes memory storedHash = posts.getMetadataHash(postId);
@@ -896,17 +896,17 @@ contract PostsTest is Base {
         buyAllTotemTokens(data.totemTokenAddr);
         
         // Verify totem is registered in Merit Manager
-        assertTrue(mm.isRegisteredTotem(data.totemAddr));
+        assertTrue(mm.isRegisteredTotem(payable(data.totemAddr)));
         
         // Create post and verify it's successful
         prank(userA);
-        uint256 postId = posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        uint256 postId = posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         assertEq(posts.ownerOf(postId), userA);
         
         // Verify the post exists
         P.Post memory post = posts.getPost(postId);
         assertEq(post.creator, userA);
-        assertEq(post.totemAddr, data.totemAddr);
+        assertEq(post.totemAddr, payable(data.totemAddr));
     }
     
     function test_CreatorRewardOnlyOncePerPost() public {
@@ -984,7 +984,7 @@ contract PostsTest is Base {
         // Try to create post while ecosystem is paused
         prank(userA);
         vm.expectRevert(P.EcosystemPaused.selector);
-        posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         
         // Unpause the ecosystem
         prank(deployer);
@@ -992,7 +992,7 @@ contract PostsTest is Base {
         
         // Should be able to create post now
         prank(userA);
-        uint256 postId = posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        uint256 postId = posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         assertEq(posts.ownerOf(postId), userA);
     }
 
@@ -1004,7 +1004,7 @@ contract PostsTest is Base {
         // Test getPost during boost window
         P.Post memory post = posts.getPost(postId);
         assertEq(post.creator, userA);
-        assertEq(post.totemAddr, data.totemAddr);
+        assertEq(post.totemAddr, payable(data.totemAddr));
         assertEq(post.totalBoostedTokens, 0); // Should be 0 during boost window
         
         // Test getMetadataHash
@@ -1041,18 +1041,18 @@ contract PostsTest is Base {
         // Test getPendingPost
         P.Post memory pendingPost = posts.getPendingPost(pendingPostId);
         assertEq(pendingPost.creator, userB);
-        assertEq(pendingPost.totemAddr, data.totemAddr);
+        assertEq(pendingPost.totemAddr, payable(data.totemAddr));
         assertEq(pendingPost.totalBoostedTokens, 0);
         
         // Test userPendingPostByTotem mapping
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), pendingPostId);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), pendingPostId);
         
         // Approve pending post
         prank(userA);
         posts.verifyPost(pendingPostId, true);
         
         // Check pending post was cleared
-        assertEq(posts.userPendingPostByTotem(userB, data.totemAddr), 0);
+        assertEq(posts.userPendingPostByTotem(userB, payable(data.totemAddr)), 0);
         
         // Test that getPendingPost still works for historical data
         pendingPost = posts.getPendingPost(pendingPostId);
@@ -1101,7 +1101,7 @@ contract PostsTest is Base {
         // Test with empty metadata hash
         prank(userA);
         vm.expectRevert(P.InvalidMetadataHash.selector);
-        posts.createPost(data.totemAddr, "");
+        posts.createPost(payable(data.totemAddr), "");
     }
 
     function test_HasPendingPostError() public {
@@ -1119,7 +1119,7 @@ contract PostsTest is Base {
         // Try to create second pending post
         prank(userB);
         vm.expectRevert(P.HasPendingPost.selector);
-        posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test2")));
+        posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test2")));
     }
 
     function test_MultipleBoostsAndUnboosts() public {
@@ -1206,8 +1206,8 @@ contract PostsTest is Base {
         // Test PostCreated event
         prank(userA);
         vm.expectEmit(true, true, true, false);
-        emit P.PostCreated(1, userA, data.totemAddr, abi.encodePacked(keccak256("Test")), false);
-        uint256 postId = posts.createPost(data.totemAddr, abi.encodePacked(keccak256("Test")));
+        emit P.PostCreated(1, userA, payable(data.totemAddr), abi.encodePacked(keccak256("Test")), false);
+        uint256 postId = posts.createPost(payable(data.totemAddr), abi.encodePacked(keccak256("Test")));
         
         // Test boost events
         prank(userB);
@@ -1326,7 +1326,7 @@ contract PostsTest is Base {
         
         // Get circulating supply for calculations
         uint256 circulatingSupply = TT(data.totemTokenAddr).totalSupply() - 
-            TT(data.totemTokenAddr).balanceOf(data.totemAddr) -
+            TT(data.totemTokenAddr).balanceOf(payable(data.totemAddr)) -
             TT(data.totemTokenAddr).balanceOf(address(distr));
         
         // UserB boosts with their purchased tokens
@@ -1427,7 +1427,7 @@ contract PostsTest is Base {
         
         // Get circulating supply for calculations
         uint256 circulatingSupply = TT(data.totemTokenAddr).totalSupply() - 
-            TT(data.totemTokenAddr).balanceOf(data.totemAddr) -
+            TT(data.totemTokenAddr).balanceOf(payable(data.totemAddr)) -
             TT(data.totemTokenAddr).balanceOf(address(distr));
         
         // UserB boosts with fixed amount
