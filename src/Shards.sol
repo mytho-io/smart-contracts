@@ -39,7 +39,7 @@ contract Shards is
      * @param _registryAddr Address of the AddressRegistry contract
      */
     function initialize(address _registryAddr) public initializer {
-        __ERC20_init("MYTHO Shard Token", "SHARD");
+        __ERC20_init("Mytho Shard Token", "SHARD");
         __ERC20Burnable_init();
         __ERC20Pausable_init();
         __AccessControl_init();
