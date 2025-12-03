@@ -128,7 +128,7 @@ contract MeritManager is
         startTime = 0; // Must be set by admin via setStartTime to begin merit distribution
 
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
-        postRewardPoints = 500; // 500 merit points for post creation initially
+        postRewardPoints = 350; // 350 merit points for post creation initially
         donationMeritDivisor = 1e14; // 1e14 divisor initially
     }
 
@@ -578,6 +578,7 @@ contract MeritManager is
      * @return Whether current time is in Mythum period
      */
     function isMythum() public view returns (bool) {
+        if (startTime == 0) return false;
         uint256 currentPeriodNumber = currentPeriod();
         uint256 periodsAfterAccumulation = currentPeriodNumber -
             accumulatedPeriods;
