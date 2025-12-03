@@ -21,7 +21,7 @@ The platform is **natively deployed on BNB Smart Chain (BSC Mainnet, Chain ID: 5
 - **PancakeSwap V2** integration for liquidity pools
 - **Cross-chain functionality** via Chainlink's CCIP for future expansion to other blockchains
 
-### Latest Additions (Under Audit)
+### Latest Additions (Audited)
 The ecosystem has recently expanded with four major new contracts that enhance user engagement and create new reward mechanisms:
 - **BoostSystem**: Daily engagement with streak rewards and VRF-powered premium boosts
 - **Posts**: Community content platform with NFT posts and SHARD token rewards
@@ -73,7 +73,7 @@ The MYTHO ecosystem consists of several interconnected smart contracts that work
 | `Treasury.sol`           | Manages and withdraws BEP20 and native tokens accumulated in the ecosystem. |
 | `AddressRegistry.sol`    | Central registry for storing and retrieving contract addresses, enabling upgradable architecture and ecosystem-wide pause functionality. |
 
-### New Ecosystem Features (Under Audit)
+### New Ecosystem Features (Audited)
 
 | Contract                  | Description                                                                 |
 |---------------------------|-----------------------------------------------------------------------------|
@@ -320,7 +320,7 @@ mytho/
 │   ├── Do.t.sol           # Additional integration tests
 │   └── util/              # Testing utilities
 ├── script/                 # Deployment and management scripts
-│   ├── Deploy.s.sol       # Main deployment script
+│   ├── DeployBNB.s.sol    # Main deployment script for BSC
 │   ├── MythoCcipSetup.s.sol # Cross-chain setup
 │   ├── CrosschainTransfer.s.sol # Cross-chain transfer testing
 │   └── Upgrade*.s.sol     # Various upgrade scripts
@@ -329,9 +329,9 @@ mytho/
 └── README.md              # This file
 ```
 
-### Contracts Under Audit
+### Audited Contracts
 
-The following contracts are currently undergoing security audit and represent the latest additions to the MYTHO ecosystem:
+The following contracts have successfully completed security audit and represent the latest additions to the MYTHO ecosystem:
 
 - **`BoostSystem.sol`** - Advanced daily engagement system with streak mechanics
 - **`Posts.sol`** - Community content platform with NFT posts and token rewards  
@@ -381,14 +381,10 @@ forge test --match-contract MythoTest
 
 ### Deployment on BNB Chain
 
-To deploy the contracts to **BNB Smart Chain (BSC)**:
+To deploy the contracts to **BNB Smart Chain (BSC Mainnet)**:
 
 ```bash
-# Deploy to BSC Mainnet (Chain ID: 56)
 forge script DeployBNB --rpc-url $BNB_RPC_URL --private-key $PRIVATE_KEY --broadcast --verify
-
-# Deploy to BSC Testnet (Chain ID: 97)
-forge script DeployBNB --rpc-url $BSC_TESTNET_RPC_URL --private-key $PRIVATE_KEY --broadcast
 ```
 
 ### Environment Variables
@@ -399,11 +395,10 @@ Create a `.env` file with the following variables for **BNB Chain deployment**:
 # Deployment wallet
 PRIVATE_KEY=your_deployment_private_key
 
-# BNB Chain RPC endpoints
-BNB_RPC_URL=https://bsc-dataseed.binance.org/  # BSC Mainnet
-BSC_TESTNET_RPC_URL=https://data-seed-prebsc-1-s1.binance.org:8545/  # BSC Testnet
+# BNB Chain RPC endpoint
+BNB_RPC_URL=https://bsc-dataseed.binance.org/
 
-# BNB Chain specific (optional)
+# BNBScan API key for contract verification (optional)
 BSCSCAN_API_KEY=your_bscscan_api_key_for_verification
 ```
 
@@ -414,12 +409,6 @@ BSCSCAN_API_KEY=your_bscscan_api_key_for_verification
 - RPC URL: `https://bsc-dataseed.binance.org/`
 - Explorer: `https://bscscan.com/`
 - Native Token: BNB
-
-**BSC Testnet:**
-- Chain ID: `97`
-- RPC URL: `https://data-seed-prebsc-1-s1.binance.org:8545/`
-- Explorer: `https://testnet.bscscan.com/`
-- Native Token: tBNB
 
 ## Cross-Chain Configuration
 
