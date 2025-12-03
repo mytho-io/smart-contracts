@@ -21,7 +21,7 @@ The platform is **natively deployed on BNB Smart Chain (BSC Mainnet, Chain ID: 5
 - **PancakeSwap V2** integration for liquidity pools
 - **Cross-chain functionality** via Chainlink's CCIP for future expansion to other blockchains
 
-### Latest Additions (Audited)
+### Latest Additions
 The ecosystem has recently expanded with four major new contracts that enhance user engagement and create new reward mechanisms:
 - **BoostSystem**: Daily engagement with streak rewards and VRF-powered premium boosts
 - **Posts**: Community content platform with NFT posts and SHARD token rewards
@@ -73,7 +73,7 @@ The MYTHO ecosystem consists of several interconnected smart contracts that work
 | `Treasury.sol`           | Manages and withdraws BEP20 and native tokens accumulated in the ecosystem. |
 | `AddressRegistry.sol`    | Central registry for storing and retrieving contract addresses, enabling upgradable architecture and ecosystem-wide pause functionality. |
 
-### New Ecosystem Features (Audited)
+### New Ecosystem Features
 
 | Contract                  | Description                                                                 |
 |---------------------------|-----------------------------------------------------------------------------|
@@ -329,9 +329,9 @@ mytho/
 └── README.md              # This file
 ```
 
-### Audited Contracts
+### Latest Contract Additions
 
-The following contracts have successfully completed security audit and represent the latest additions to the MYTHO ecosystem:
+The following contracts represent the latest additions to the MYTHO ecosystem:
 
 - **`BoostSystem.sol`** - Advanced daily engagement system with streak mechanics
 - **`Posts.sol`** - Community content platform with NFT posts and token rewards  
