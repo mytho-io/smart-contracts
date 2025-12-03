@@ -7,7 +7,9 @@ import {ERC20PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/toke
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
+
 import {AddressRegistry} from "./AddressRegistry.sol";
+import {TotemFactory} from "./TotemFactory.sol";
 
 /**
  * @title MYTHO Government Token
@@ -21,11 +23,11 @@ contract MYTHO is
     // Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
 
-    // Totem incentives distribution (20M total)
-    uint256 public constant MERIT_YEAR_1 = 8_000_000 * 10 ** 18; // 40% of 20M
-    uint256 public constant MERIT_YEAR_2 = 6_000_000 * 10 ** 18; // 30% of 20M
-    uint256 public constant MERIT_YEAR_3 = 4_000_000 * 10 ** 18; // 20% of 20M
-    uint256 public constant MERIT_YEAR_4 = 2_000_000 * 10 ** 18; // 10% of 20M
+    // Totem incentives distribution (100M total)
+    uint256 public constant MERIT_YEAR_1 = 40_000_000 * 10 ** 18; // 40% of 100M
+    uint256 public constant MERIT_YEAR_2 = 30_000_000 * 10 ** 18; // 30% of 100M
+    uint256 public constant MERIT_YEAR_3 = 20_000_000 * 10 ** 18; // 20% of 100M
+    uint256 public constant MERIT_YEAR_4 = 10_000_000 * 10 ** 18; // 10% of 100M
 
     // Vesting duration
     uint64 public constant ONE_YEAR = 12 * 30 days;
@@ -35,6 +37,7 @@ contract MYTHO is
     // Roles
     bytes32 public constant MANAGER = keccak256("MANAGER");
     bytes32 public constant MULTISIG = keccak256("MULTISIG");
+    bytes32 public constant TRANSFEROR = keccak256("TRANSFEROR");
 
     // Vesting wallet addresses for merit distribution
     address public meritVestingYear1;
@@ -48,11 +51,15 @@ contract MYTHO is
     // Track total minted amount (never decreases, even with burns)
     uint256 public totalMinted;
 
+    // Flag that defines if MYTHO transfers are not restricted
+    bool public transfersRestricted;
+
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
     error EcosystemPaused();
     error InvalidAmount();
     error ExceedsMaxSupply();
+    error TransfersRestricted();
 
     // Events
     event VestingCreated(
@@ -61,6 +68,7 @@ contract MYTHO is
         uint256 amount,
         uint64 duration
     );
+    event TransferabilityToggled(bool newTrasferability);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -123,13 +131,21 @@ contract MYTHO is
         registryAddr = _registryAddr;
 
         // Mint and distribute only merit tokens to vesting wallets
-        uint256 meritTotal = MERIT_YEAR_1 + MERIT_YEAR_2 + MERIT_YEAR_3 + MERIT_YEAR_4;
+        uint256 meritTotal = MERIT_YEAR_1 +
+            MERIT_YEAR_2 +
+            MERIT_YEAR_3 +
+            MERIT_YEAR_4;
         totalMinted = meritTotal;
 
         _mint(meritVestingYear1, MERIT_YEAR_1);
         _mint(meritVestingYear2, MERIT_YEAR_2);
         _mint(meritVestingYear3, MERIT_YEAR_3);
         _mint(meritVestingYear4, MERIT_YEAR_4);
+
+        _grantRole(TRANSFEROR, meritVestingYear1);
+        _grantRole(TRANSFEROR, meritVestingYear2);
+        _grantRole(TRANSFEROR, meritVestingYear3);
+        _grantRole(TRANSFEROR, meritVestingYear4);
     }
 
     // ADMIN FUNCTIONS
@@ -187,6 +203,15 @@ contract MYTHO is
     }
 
     /**
+     * @notice Switch MYTHO trasferability
+     */
+    function toggleTransferability() external onlyRole(MANAGER) {
+        transfersRestricted = !transfersRestricted;
+
+        emit TransferabilityToggled(transfersRestricted);
+    }
+
+    /**
      * @dev Throws if the contract is paused or if the ecosystem is paused.
      */
     function _requireNotPaused() internal view virtual override {
@@ -201,6 +226,16 @@ contract MYTHO is
 
     // INTERNAL FUNCTIONS
 
+    function _callerIsTotem(address _caller) internal view returns (bool) {
+        TotemFactory factory = TotemFactory(AddressRegistry(registryAddr).getTotemFactory());
+
+        try factory.getTotemDataByAddress(_caller) returns (TotemFactory.TotemData memory) {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     /**
      * @notice Internal function to update token balances
      * @param from The address to transfer from
@@ -212,6 +247,13 @@ contract MYTHO is
         address to,
         uint256 value
     ) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) {
+        if (from != address(0) && to != address(0)) {
+            if (
+                transfersRestricted &&
+                !hasRole(TRANSFEROR, msg.sender) &&
+                !_callerIsTotem(msg.sender)
+            ) revert TransfersRestricted();
+        }
         super._update(from, to, value);
     }
 
