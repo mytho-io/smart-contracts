@@ -859,7 +859,7 @@ contract BoostSystem is AccessControlUpgradeable, PausableUpgradeable, Reentranc
         userTotalPeriodMerit[pendingBoost.user][currentPeriod] += finalReward;
 
         // Credit merit points
-        meritManager.boostReward(pendingBoost.totemAddr, finalReward, pendingBoost.user);
+        meritManager.premiumBoostReward(pendingBoost.totemAddr, finalReward, pendingBoost.user);
 
         // Clean up
         delete pendingBoosts[_requestId];
