@@ -129,11 +129,17 @@ contract DeployMinato is Script {
             mytho.meritVestingYear4()
         ];
 
+        uint256[4] memory vestingAllocations;
+        vestingAllocations[0] = 8_000_000 ether;
+        vestingAllocations[1] = 6_000_000 ether;
+        vestingAllocations[2] = 4_000_000 ether;
+        vestingAllocations[3] = 2_000_000 ether;
+
         registry.setAddress(bytes32("MERIT_MANAGER"), address(mm));
         registry.setAddress(bytes32("MYTHO_TOKEN"), address(mytho));
         registry.setAddress(bytes32("MYTHO_TREASURY"), address(treasury));
 
-        mm.initialize(address(registry), vestingAddresses);
+        mm.initialize(address(registry), vestingAddresses, vestingAllocations);
 
         // TotemTokenDistributor
         distrImpl = new TTD();
@@ -142,7 +148,7 @@ contract DeployMinato is Script {
             deployer,
             ""
         );
-        distr = TTD(address(distrProxy));
+        distr = TTD(payable(address(distrProxy)));
         distr.initialize(address(registry));
 
         registry.setAddress(bytes32("TOTEM_TOKEN_DISTRIBUTOR"), address(distr));

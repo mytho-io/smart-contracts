@@ -106,7 +106,7 @@ contract TotemFactory is PausableUpgradeable, AccessControlUpgradeable {
         if (_feeTokenAddr == address(0)) revert ZeroAddress();
 
         totemDistributor = TotemTokenDistributor(
-            AddressRegistry(_registryAddr).getTotemTokenDistributor()
+            payable(AddressRegistry(_registryAddr).getTotemTokenDistributor())
         );
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();

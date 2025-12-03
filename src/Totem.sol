@@ -4,15 +4,18 @@ pragma solidity ^0.8.28;
 
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {TotemTokenDistributor} from "./TotemTokenDistributor.sol";
 import {MeritManager} from "./MeritManager.sol";
 import {AddressRegistry} from "./AddressRegistry.sol";
 import {TotemToken} from "./TotemToken.sol";
 import {TokenHoldersOracle} from "./utils/TokenHoldersOracle.sol";
+
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IWBNB} from "./interfaces/IWBNB.sol";
 
 /**
  * @title Totem
@@ -40,7 +43,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
     // State variables - Addresses
     address private treasuryAddr;
-    address private totemDistributorAddr;
+    address payable private totemDistributorAddr;
     address private meritManagerAddr;
     address private owner;
     address[] private collaborators;
@@ -121,8 +124,8 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         dataHash = _dataHash;
 
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
-        totemDistributorAddr = AddressRegistry(_registryAddr)
-            .getTotemTokenDistributor();
+        totemDistributorAddr = payable(AddressRegistry(_registryAddr)
+            .getTotemTokenDistributor());
         meritManagerAddr = AddressRegistry(_registryAddr).getMeritManager();
         mythoToken = IERC20(AddressRegistry(_registryAddr).getMythoToken());
         tokenType = TokenType(_tokenType);
@@ -135,7 +138,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         // Custom tokens don't use the payment token from the distributor
         if (!isCustomToken()) {
             paymentToken = IERC20(
-                TotemTokenDistributor(totemDistributorAddr).getPaymentToken()
+                payable(TotemTokenDistributor(totemDistributorAddr).getPaymentToken())
             );
         }
 
@@ -143,6 +146,11 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     // EXTERNAL FUNCTIONS
+    
+    /**
+     * @notice Required for receiving native tokens from WBNB
+     */
+    receive() external payable {}
 
     /**
      * @notice Allows TotemToken holders to redeem or transfer their tokens and receive proportional shares of assets
@@ -271,7 +279,12 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
 
         // Transfer payment tokens if there are any
         if (paymentAmount > 0) {
-            paymentToken.safeTransfer(msg.sender, paymentAmount);
+            if (address(paymentToken) == AddressRegistry(registryAddr).getWBNB()) {
+                IWBNB(AddressRegistry(registryAddr).getWBNB()).withdraw(paymentAmount);
+                Address.sendValue(payable(msg.sender), paymentAmount);
+            } else {
+                paymentToken.safeTransfer(msg.sender, paymentAmount);
+            }
         }
 
         // Transfer MYTHO tokens if there are any
@@ -329,7 +342,13 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         
         if (contractBalance < _amount) revert InsufficientTotemBalance();
 
-        token.safeTransfer(_to, _amount);
+        // if token is wbnb send native bnb and send erc20 if not
+        if (_token == AddressRegistry(registryAddr).getWBNB()) {
+            IWBNB(AddressRegistry(registryAddr).getWBNB()).withdraw(_amount);
+            Address.sendValue(payable(_to), _amount);
+        } else {
+            token.safeTransfer(_to, _amount);
+        }
         
         emit TokenWithdrawn(_token, _to, _amount);
     }

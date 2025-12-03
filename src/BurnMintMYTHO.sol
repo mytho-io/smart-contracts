@@ -9,6 +9,8 @@ import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Ini
 import {OwnableUpgradeable} from "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
+import {AddressRegistry} from "./AddressRegistry.sol";
 
 /**
  * @title MYTHO Government Token for non-native chains (Upgradeable)
@@ -30,16 +32,50 @@ contract BurnMintMYTHO is
     // Allowed burner addresses
     EnumerableSet.AddressSet internal s_burners;
 
+    // Vesting duration
+    uint64 public constant ONE_YEAR = 12 * 30 days;
+
+    // Registry address
+    address public registryAddr;
+
+    // Vesting wallet addresses for merit distribution
+    address public meritVestingYear1;
+    address public meritVestingYear2;
+    address public meritVestingYear3;
+    address public meritVestingYear4;
+
+    // Merit distribution state
+    bool public meritDistributionInitialized;
+
     // Events
     event MintAccessGranted(address indexed minter);
     event BurnAccessGranted(address indexed burner);
     event MintAccessRevoked(address indexed minter);
     event BurnAccessRevoked(address indexed burner);
+    event MeritDistributionInitialized(
+        address indexed meritManager,
+        uint64 startTimestamp,
+        uint256[4] amounts,
+        address year1,
+        address year2,
+        address year3,
+        address year4
+    );
+    event VestingCreated(
+        address indexed beneficiary,
+        address vestingWallet,
+        uint256 amount,
+        uint64 duration
+    );
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
     error SenderNotMinter(address sender);
     error SenderNotBurner(address sender);
+    error MeritDistributionAlreadyInitialized();
+    error InsufficientBalance();
+    error InvalidAmount();
+    error InvalidStartTime();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -48,12 +84,17 @@ contract BurnMintMYTHO is
 
     /**
      * @notice Initializes the BurnMintMYTHO token contract for non-native chains
+     * @param _registryAddr Address of the AddressRegistry contract
      */
-    function initialize() public initializer {
+    function initialize(address _registryAddr) public initializer {
         __ERC20_init("MYTHO Government Token", "MYTHO");
         __ERC20Burnable_init();
         __ERC20Pausable_init();
         __Ownable_init(msg.sender);
+
+        if (_registryAddr == address(0))
+            revert ZeroAddressNotAllowed("registry");
+        registryAddr = _registryAddr;
 
         // No initial token minting or distribution
         // Tokens will be minted by the BurnMintTokenPool when transferred from the native chain
@@ -131,6 +172,118 @@ contract BurnMintMYTHO is
      */
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /**
+     * @notice Initializes merit distribution by creating vesting wallets
+     * @param _amounts Array of token amounts for each year [year1, year2, year3, year4]
+     * @param _startTimestamp When vesting should start
+     * @dev Can only be called once. Gets MeritManager address from registry.
+     */
+    function initializeMeritDistribution(
+        uint256[4] calldata _amounts,
+        uint64 _startTimestamp
+    ) external onlyOwner {
+        if (meritDistributionInitialized)
+            revert MeritDistributionAlreadyInitialized();
+        if (_startTimestamp <= block.timestamp) revert InvalidStartTime();
+
+        // Get MeritManager address from registry
+        address meritManager = AddressRegistry(registryAddr).getMeritManager();
+        if (meritManager == address(0))
+            revert ZeroAddressNotAllowed("merit manager");
+
+        // Calculate total amount needed
+        uint256 totalMeritAmount = _amounts[0] +
+            _amounts[1] +
+            _amounts[2] +
+            _amounts[3];
+        if (totalMeritAmount == 0) revert InvalidAmount();
+        if (balanceOf(address(this)) < totalMeritAmount)
+            revert InsufficientBalance();
+
+        // Create vesting wallets for merit distribution (4 years)
+        meritVestingYear1 = address(
+            new VestingWallet(meritManager, _startTimestamp, ONE_YEAR)
+        );
+        meritVestingYear2 = address(
+            new VestingWallet(
+                meritManager,
+                _startTimestamp + ONE_YEAR,
+                ONE_YEAR
+            )
+        );
+        meritVestingYear3 = address(
+            new VestingWallet(
+                meritManager,
+                _startTimestamp + 2 * ONE_YEAR,
+                ONE_YEAR
+            )
+        );
+        meritVestingYear4 = address(
+            new VestingWallet(
+                meritManager,
+                _startTimestamp + 3 * ONE_YEAR,
+                ONE_YEAR
+            )
+        );
+
+        // Transfer tokens to vesting wallets
+        if (_amounts[0] > 0)
+            _transfer(address(this), meritVestingYear1, _amounts[0]);
+        if (_amounts[1] > 0)
+            _transfer(address(this), meritVestingYear2, _amounts[1]);
+        if (_amounts[2] > 0)
+            _transfer(address(this), meritVestingYear3, _amounts[2]);
+        if (_amounts[3] > 0)
+            _transfer(address(this), meritVestingYear4, _amounts[3]);
+
+        meritDistributionInitialized = true;
+
+        emit MeritDistributionInitialized(
+            meritManager,
+            _startTimestamp,
+            _amounts,
+            meritVestingYear1,
+            meritVestingYear2,
+            meritVestingYear3,
+            meritVestingYear4
+        );
+    }
+
+    /**
+     * @notice Creates a new vesting wallet and transfers tokens to it
+     * @param beneficiary Address that will receive the vested tokens
+     * @param amount Amount of tokens to vest
+     * @param startTimestamp When vesting starts
+     * @param durationSeconds Duration of vesting in seconds
+     * @return vestingWallet Address of the created vesting wallet
+     */
+    function createVesting(
+        address beneficiary,
+        uint256 amount,
+        uint64 startTimestamp,
+        uint64 durationSeconds
+    ) external onlyOwner returns (address vestingWallet) {
+        if (beneficiary == address(0))
+            revert ZeroAddressNotAllowed("beneficiary");
+        if (amount == 0) revert InvalidAmount();
+        if (balanceOf(address(this)) < amount) revert InsufficientBalance();
+
+        // Create new vesting wallet
+        vestingWallet = address(
+            new VestingWallet(beneficiary, startTimestamp, durationSeconds)
+        );
+
+        // Transfer tokens to vesting wallet
+        _transfer(address(this), vestingWallet, amount);
+
+        emit VestingCreated(
+            beneficiary,
+            vestingWallet,
+            amount,
+            durationSeconds
+        );
     }
 
     /**
@@ -225,5 +378,38 @@ contract BurnMintMYTHO is
      */
     function isBurner(address burner) public view returns (bool) {
         return s_burners.contains(burner);
+    }
+
+    /**
+     * @notice Checks if merit distribution has been initialized
+     * @return Whether merit distribution vesting wallets have been created
+     */
+    function isMeritDistributionInitialized() external view returns (bool) {
+        return meritDistributionInitialized;
+    }
+
+    /**
+     * @notice Gets all merit vesting wallet addresses
+     * @return Array of merit vesting wallet addresses [year1, year2, year3, year4]
+     */
+    function getMeritVestingWallets()
+        external
+        view
+        returns (address[4] memory)
+    {
+        return [
+            meritVestingYear1,
+            meritVestingYear2,
+            meritVestingYear3,
+            meritVestingYear4
+        ];
+    }
+
+    /**
+     * @notice Gets the address registry
+     * @return Address of the AddressRegistry contract
+     */
+    function getRegistry() external view returns (address) {
+        return registryAddr;
     }
 }

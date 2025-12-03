@@ -163,7 +163,7 @@ contract MythoCcipSetup is Script {
             ""
         );
         BurnMintMYTHO remoteToken = BurnMintMYTHO(address(remoteProxy));
-        remoteToken.initialize();
+        remoteToken.initialize(address(0x1234567890123456789012345678901234567890)); // Placeholder registry address
 
         BurnMintTokenPool remotePool = new BurnMintTokenPool(
             IBurnMintERC20(address(remoteToken)),

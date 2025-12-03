@@ -6,7 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
-import {AddressRegistry} from "../src/AddressRegistry.sol";
+import {AddressRegistry} from "./AddressRegistry.sol";
 
 /**
  * @title TotemToken
@@ -96,12 +96,12 @@ contract TotemToken is ERC20, ERC20Burnable, ERC20Permit {
         address _to,
         uint256 _value
     ) internal override {
-        // During sale period, only the distributor and Layers contract can transfer tokens
+        // During sale period, only the distributor and Posts contract can transfer tokens
         // All other transfers (including burning) are restricted during sale period
         if (
             salePeriod &&
             msg.sender != totemDistributor &&
-            msg.sender != AddressRegistry(registryAddr).getLayers()
+            msg.sender != AddressRegistry(registryAddr).getPosts()
         ) {
             revert NotAllowedInSalePeriod();
         }

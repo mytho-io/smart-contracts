@@ -7,14 +7,12 @@ import {ERC20PausableUpgradeable} from "@openzeppelin-upgradeable/contracts/toke
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin-upgradeable/contracts/access/AccessControlUpgradeable.sol";
-
 import {AddressRegistry} from "./AddressRegistry.sol";
-import {TotemFactory} from "./TotemFactory.sol";
 
 /**
  * @title MYTHO Government Token
  */
-contract MYTHO is
+contract MYTHOBNB is
     Initializable,
     ERC20Upgradeable,
     ERC20PausableUpgradeable,
@@ -22,12 +20,6 @@ contract MYTHO is
 {
     // Token distribution
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
-
-    // Totem incentives distribution (100M total)
-    uint256 public constant MERIT_YEAR_1 = 40_000_000 * 10 ** 18; // 40% of 100M
-    uint256 public constant MERIT_YEAR_2 = 30_000_000 * 10 ** 18; // 30% of 100M
-    uint256 public constant MERIT_YEAR_3 = 20_000_000 * 10 ** 18; // 20% of 100M
-    uint256 public constant MERIT_YEAR_4 = 10_000_000 * 10 ** 18; // 10% of 100M
 
     // Vesting duration
     uint64 public constant ONE_YEAR = 12 * 30 days;
@@ -37,7 +29,6 @@ contract MYTHO is
     // Roles
     bytes32 public constant MANAGER = keccak256("MANAGER");
     bytes32 public constant MULTISIG = keccak256("MULTISIG");
-    bytes32 public constant TRANSFEROR = keccak256("TRANSFEROR");
 
     // Vesting wallet addresses for merit distribution
     address public meritVestingYear1;
@@ -51,15 +42,16 @@ contract MYTHO is
     // Track total minted amount (never decreases, even with burns)
     uint256 public totalMinted;
 
-    // Flag that defines if MYTHO transfers are not restricted
-    bool public transfersRestricted;
+    // Merit distribution state
+    bool public meritDistributionInitialized;
 
     // Custom errors
     error ZeroAddressNotAllowed(string receiverType);
     error EcosystemPaused();
     error InvalidAmount();
     error ExceedsMaxSupply();
-    error TransfersRestricted();
+    error MeritDistributionAlreadyInitialized();
+    error InvalidStartTime();
 
     // Events
     event VestingCreated(
@@ -68,7 +60,15 @@ contract MYTHO is
         uint256 amount,
         uint64 duration
     );
-    event TransferabilityToggled(bool newTrasferability);
+    event MeritDistributionInitialized(
+        address indexed meritManager,
+        uint64 startTimestamp,
+        uint256[4] amounts,
+        address year1,
+        address year2,
+        address year3,
+        address year4
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -77,19 +77,13 @@ contract MYTHO is
 
     /**
      * @notice Initializes the MYTHO token contract
-     * @param _meritManager Address to receive totem incentives
      * @param _registryAddr Address of the registry contract
      */
-    function initialize(
-        address _meritManager,
-        address _registryAddr
-    ) public initializer {
+    function initialize(address _registryAddr) public initializer {
         __ERC20_init("MYTHO Governance Token", "MYTHO");
         __ERC20Pausable_init();
         __AccessControl_init();
 
-        if (_meritManager == address(0))
-            revert ZeroAddressNotAllowed("merit manager");
         if (_registryAddr == address(0))
             revert ZeroAddressNotAllowed("registry");
 
@@ -98,54 +92,10 @@ contract MYTHO is
         _grantRole(MANAGER, msg.sender);
         _grantRole(MULTISIG, msg.sender);
 
-        // Set the start timestamp for vesting
-        uint64 startTimestamp = uint64(block.timestamp);
-
-        // Create vesting wallets for totem incentives (4 years)
-        meritVestingYear1 = address(
-            new VestingWallet(_meritManager, startTimestamp, ONE_YEAR)
-        );
-        meritVestingYear2 = address(
-            new VestingWallet(
-                _meritManager,
-                startTimestamp + ONE_YEAR,
-                ONE_YEAR
-            )
-        );
-        meritVestingYear3 = address(
-            new VestingWallet(
-                _meritManager,
-                startTimestamp + 2 * ONE_YEAR,
-                ONE_YEAR
-            )
-        );
-        meritVestingYear4 = address(
-            new VestingWallet(
-                _meritManager,
-                startTimestamp + 3 * ONE_YEAR,
-                ONE_YEAR
-            )
-        );
-
         // Set registry address
         registryAddr = _registryAddr;
 
-        // Mint and distribute only merit tokens to vesting wallets
-        uint256 meritTotal = MERIT_YEAR_1 +
-            MERIT_YEAR_2 +
-            MERIT_YEAR_3 +
-            MERIT_YEAR_4;
-        totalMinted = meritTotal;
-
-        _mint(meritVestingYear1, MERIT_YEAR_1);
-        _mint(meritVestingYear2, MERIT_YEAR_2);
-        _mint(meritVestingYear3, MERIT_YEAR_3);
-        _mint(meritVestingYear4, MERIT_YEAR_4);
-
-        _grantRole(TRANSFEROR, meritVestingYear1);
-        _grantRole(TRANSFEROR, meritVestingYear2);
-        _grantRole(TRANSFEROR, meritVestingYear3);
-        _grantRole(TRANSFEROR, meritVestingYear4);
+        // Merit distribution will be initialized separately via initializeMeritDistribution
     }
 
     // ADMIN FUNCTIONS
@@ -162,6 +112,64 @@ contract MYTHO is
      */
     function unpause() external onlyRole(MANAGER) {
         _unpause();
+    }
+
+    /**
+     * @notice Initializes merit distribution by creating vesting wallets
+     * @param _amounts Array of token amounts for each year [year1, year2, year3, year4]
+     * @param _startTimestamp When vesting should start
+     * @dev Can only be called once. Gets MeritManager address from registry.
+     */
+    function initializeMeritDistribution(
+        uint256[4] calldata _amounts,
+        uint64 _startTimestamp
+    ) external onlyRole(MULTISIG) {
+        if (meritDistributionInitialized) revert MeritDistributionAlreadyInitialized();
+        if (_startTimestamp <= block.timestamp) revert InvalidStartTime();
+
+        // Get MeritManager address from registry
+        address meritManager = AddressRegistry(registryAddr).getMeritManager();
+        if (meritManager == address(0)) revert ZeroAddressNotAllowed("merit manager");
+
+        // Calculate total amount needed
+        uint256 totalMeritAmount = _amounts[0] + _amounts[1] + _amounts[2] + _amounts[3];
+        if (totalMeritAmount == 0) revert InvalidAmount();
+        if (totalMinted + totalMeritAmount > TOTAL_SUPPLY) revert ExceedsMaxSupply();
+
+        // Create vesting wallets for merit distribution (4 years)
+        meritVestingYear1 = address(
+            new VestingWallet(meritManager, _startTimestamp, ONE_YEAR)
+        );
+        meritVestingYear2 = address(
+            new VestingWallet(meritManager, _startTimestamp + ONE_YEAR, ONE_YEAR)
+        );
+        meritVestingYear3 = address(
+            new VestingWallet(meritManager, _startTimestamp + 2 * ONE_YEAR, ONE_YEAR)
+        );
+        meritVestingYear4 = address(
+            new VestingWallet(meritManager, _startTimestamp + 3 * ONE_YEAR, ONE_YEAR)
+        );
+
+        // Update total minted tracking
+        totalMinted += totalMeritAmount;
+
+        // Mint tokens to vesting wallets
+        if (_amounts[0] > 0) _mint(meritVestingYear1, _amounts[0]);
+        if (_amounts[1] > 0) _mint(meritVestingYear2, _amounts[1]);
+        if (_amounts[2] > 0) _mint(meritVestingYear3, _amounts[2]);
+        if (_amounts[3] > 0) _mint(meritVestingYear4, _amounts[3]);
+
+        meritDistributionInitialized = true;
+
+        emit MeritDistributionInitialized(
+            meritManager,
+            _startTimestamp,
+            _amounts,
+            meritVestingYear1,
+            meritVestingYear2,
+            meritVestingYear3,
+            meritVestingYear4
+        );
     }
 
     /**
@@ -203,15 +211,6 @@ contract MYTHO is
     }
 
     /**
-     * @notice Switch MYTHO trasferability
-     */
-    function toggleTransferability() external onlyRole(MANAGER) {
-        transfersRestricted = !transfersRestricted;
-
-        emit TransferabilityToggled(transfersRestricted);
-    }
-
-    /**
      * @dev Throws if the contract is paused or if the ecosystem is paused.
      */
     function _requireNotPaused() internal view virtual override {
@@ -226,16 +225,6 @@ contract MYTHO is
 
     // INTERNAL FUNCTIONS
 
-    function _callerIsTotem(address _caller) internal view returns (bool) {
-        TotemFactory factory = TotemFactory(AddressRegistry(registryAddr).getTotemFactory());
-
-        try factory.getTotemDataByAddress(_caller) returns (TotemFactory.TotemData memory) {
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
     /**
      * @notice Internal function to update token balances
      * @param from The address to transfer from
@@ -247,14 +236,31 @@ contract MYTHO is
         address to,
         uint256 value
     ) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) {
-        if (from != address(0) && to != address(0)) {
-            if (
-                transfersRestricted &&
-                !hasRole(TRANSFEROR, msg.sender) &&
-                !_callerIsTotem(msg.sender)
-            ) revert TransfersRestricted();
-        }
         super._update(from, to, value);
+    }
+
+    /**
+     * @notice Checks if merit distribution has been initialized
+     * @return Whether merit distribution vesting wallets have been created
+     */
+    function isMeritDistributionInitialized() external view returns (bool) {
+        return meritDistributionInitialized;
+    }
+
+    /**
+     * @notice Gets all merit vesting wallet addresses
+     * @return Array of merit vesting wallet addresses [year1, year2, year3, year4]
+     */
+    function getMeritVestingWallets() external view returns (address[4] memory) {
+        return [meritVestingYear1, meritVestingYear2, meritVestingYear3, meritVestingYear4];
+    }
+
+    /**
+     * @notice Gets the address registry
+     * @return Address of the AddressRegistry contract
+     */
+    function getRegistry() external view returns (address) {
+        return registryAddr;
     }
 
     /**

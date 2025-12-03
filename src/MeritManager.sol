@@ -12,6 +12,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {AddressRegistry} from "./AddressRegistry.sol";
 import {Totem} from "./Totem.sol";
+import {Posts} from "./Posts.sol";
 
 /**
  * @title MeritManager
@@ -33,10 +34,10 @@ contract MeritManager is
     address private registryAddr;
     address[4] private vestingWallets;
     uint256[4] private vestingWalletsAllocation;
-    uint256 public boostFee; // Fee in native tokens for boosting
+    uint256 public boostFee; // Deprecated, remained for layout consistency
     uint256 public periodDuration;
-    uint256 public startTime; // Initially set to deployment timestamp, updated when period duration changes
-    uint256 public oneTotemBoost; // Amount of merit points awarded for a boost
+    uint256 public startTime; // Initially set to 0, updated by admin to begin merit distribution
+    uint256 public oneTotemBoost; // Deprecated, remained for layout consistency
     uint256 public mythumMultiplier; // Multiplier for merit during Mythum period (default: 150 = 1.5x)
     uint256 public lastProcessedPeriod; // Last period that was fully processed
     uint256 public accumulatedPeriods; // Number of periods accumulated before period duration changes
@@ -44,14 +45,16 @@ contract MeritManager is
 
     // Mappings
     mapping(uint256 period => uint256 totalPoints) public totalMeritPoints; // Total merit points across all totems per period
-    mapping(uint256 period => mapping(address totemAddress => uint256 points))
-        public totemMerit; // Merit points for each totem per period
-    mapping(uint256 period => mapping(address totemAddr => bool claimed))
-        public isClaimed; // Whether rewards have been claimed for a period by a specific totem
+    mapping(uint256 period => mapping(address totemAddress => uint256 points)) public totemMerit; // Merit points for each totem per period
+    mapping(uint256 period => mapping(address totemAddr => bool claimed)) public isClaimed; // Whether rewards have been claimed for a period by a specific totem
     mapping(uint256 period => uint256 releasedMytho) public releasedMytho; // Total MYTHO released per period
-    mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Whether a user has boosted in a period
-    mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Which Totem a user boosted in a period
+    mapping(uint256 => mapping(address => bool)) public userBoostedInPeriod; // Deprecated, remained for layout consistency
+    mapping(uint256 => mapping(address => address)) public userBoostedTotem; // Deprecated, remained for layout consistency
     mapping(address => bool) public registeredTotems; // Totem state tracking
+    mapping(address => uint256) public totemKarma; // Karma points per totem
+
+    uint256 public postRewardPoints; // Merit points awarded for creating a Post
+    uint256 public donationMeritDivisor; // Donation amount is divided by this to get merit points (e.g. 1e14)
 
     // Constants - Roles
     bytes32 public constant MANAGER = keccak256("MANAGER");
@@ -61,16 +64,15 @@ contract MeritManager is
     // Events
     event TotemRegistered(address indexed totem);
     event TotemBlacklisted(address indexed totem, bool blacklisted);
-    event MeritCredited(address indexed totem, uint256 amount, uint256 period);
-    event TotemBoosted(
-        address indexed totem,
-        address indexed booster,
-        uint256 amount,
-        uint256 period
-    );
+    event MeritCredited(address indexed totem, uint256 amount, uint256 period, address indexed who, string indexed source); // prettier-ignore
     event MythoClaimed(address indexed totem, uint256 amount, uint256 period);
     event MythoReleased(uint256 amount, uint256 period);
     event ParameterUpdated(string parameterName, uint256 newValue);
+    event StartTimeSet(uint256 startTime);
+    event PostRewardUpdated(uint256 amount); // prettier-ignore
+    event KarmaUpdated(address indexed totem, uint256 amount, bool increased); // prettier-ignore
+    event DonationTooSmallForMerit(address indexed totem, uint256 donationAmount, uint256 minimumRequired); // prettier-ignore
+    event DonationRewarded(address indexed who, address indexed totemAddr, uint256 meritPoints); // prettier-ignore
 
     // Custom errors
     error TotemNotRegistered();
@@ -78,9 +80,6 @@ contract MeritManager is
     error TotemAlreadyRegistered();
     error AlreadyBlacklisted(address totem);
     error AlreadyNotInBlacklist(address totem);
-    error InsufficientBoostFee();
-    error NotInMythumPeriod();
-    error AlreadyBoostedInPeriod();
     error AccessControl();
     error NoMythoToClaim();
     error AlreadyClaimed(uint256 period);
@@ -90,15 +89,22 @@ contract MeritManager is
     error InvalidPeriodDuration();
     error ZeroAmount();
     error EcosystemPaused();
+    error NotAuthorized();
+    error InsufficientKarma();
+    error InvalidDivisor();
+    error StartTimeAlreadySet();
+    error InvalidStartTime();
 
     /**
      * @notice Initializes the contract with required parameters
      * @param _registryAddr Address of the AddressRegistry contract
      * @param _vestingWallets Array of vesting wallet addresses
+     * @param _vestingWalletsAllocation Array of token allocations for each vesting wallet
      */
     function initialize(
         address _registryAddr,
-        address[4] memory _vestingWallets
+        address[4] memory _vestingWallets,
+        uint256[4] memory _vestingWalletsAllocation
     ) public initializer {
         __AccessControl_init();
         __ReentrancyGuard_init();
@@ -109,6 +115,7 @@ contract MeritManager is
 
         for (uint i = 0; i < 4; i++) {
             if (_vestingWallets[i] == address(0)) revert InvalidAddress();
+            if (_vestingWalletsAllocation[i] == 0) revert ZeroAmount();
         }
 
         registryAddr = _registryAddr;
@@ -116,18 +123,13 @@ contract MeritManager is
         treasuryAddr = AddressRegistry(_registryAddr).getMythoTreasury();
 
         vestingWallets = _vestingWallets;
+        vestingWalletsAllocation = _vestingWalletsAllocation;
         periodDuration = 30 days;
-        startTime = block.timestamp; // Initially set to deployment timestamp
-        vestingWalletsAllocation = [
-            8_000_000 ether,
-            6_000_000 ether,
-            4_000_000 ether,
-            2_000_000 ether
-        ];
+        startTime = 0; // Must be set by admin via setStartTime to begin merit distribution
 
-        oneTotemBoost = 10; // 10 merit points per boost initially
         mythumMultiplier = 150; // 1.5x multiplier (150/100)
-        boostFee = 0.001 ether; // 0.001 native tokens for boost fee
+        postRewardPoints = 350; // 350 merit points for post creation initially
+        donationMeritDivisor = 1e14; // 1e14 divisor initially
     }
 
     // EXTERNAL FUNCTIONS
@@ -145,52 +147,6 @@ contract MeritManager is
         registeredTotemsList.push(_totemAddr);
 
         emit TotemRegistered(_totemAddr);
-    }
-
-    /**
-     * @notice Allows a user to boost a totem by paying a fee
-     * @param _totemAddr Address of the totem to boost
-     */
-    function boostTotem(
-        address _totemAddr
-    ) external payable nonReentrant whenNotPaused {
-        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
-        if (msg.value < boostFee) revert InsufficientBoostFee();
-        if (!isMythum()) revert NotInMythumPeriod();
-
-        // Get the totem token address and check if the user has it
-        (address totemTokenAddr, , ) = Totem(_totemAddr).getTokenAddresses();
-        if (IERC20(totemTokenAddr).balanceOf(msg.sender) == 0)
-            revert InsufficientTotemBalance();
-
-        uint256 currentPeriod_ = currentPeriod();
-
-        if (userBoostedInPeriod[currentPeriod_][msg.sender])
-            revert AlreadyBoostedInPeriod();
-
-        if (msg.value > boostFee) {
-            // Refund excess boost fee
-            payable(msg.sender).sendValue(msg.value - boostFee);
-        }
-
-        // Transfer boost fee to revenue pool
-        payable(treasuryAddr).sendValue(boostFee);
-
-        // Mark user as having boosted in this period
-        userBoostedInPeriod[currentPeriod_][msg.sender] = true;
-        userBoostedTotem[currentPeriod_][msg.sender] = _totemAddr;
-
-        // Add merit to the totem
-        totemMerit[currentPeriod_][_totemAddr] += oneTotemBoost;
-        totalMeritPoints[currentPeriod_] += oneTotemBoost;
-
-        emit TotemBoosted(
-            _totemAddr,
-            msg.sender,
-            oneTotemBoost,
-            currentPeriod_
-        );
     }
 
     /**
@@ -227,6 +183,84 @@ contract MeritManager is
         emit MythoClaimed(totemAddr, totemShare, _periodNum);
     }
 
+    /**
+     * @notice Awards merit points to a Totem for boosting
+     * @dev Only callable by the BoostSystem contract
+     * @param _totemAddr Address of the Totem to credit merit to
+     */
+    function boostReward(
+        address _totemAddr,
+        uint256 _amountToAdd,
+        address _who
+    ) external {
+        if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
+            revert NotAuthorized();
+
+        _creditMerit(_totemAddr, _amountToAdd, _who, "boostReward");
+    }
+
+    /**
+     * @notice Awards merit points to a Totem for premium boosting
+     * @dev Only callable by the BoostSystem contract
+     * @param _totemAddr Address of the Totem to credit merit to
+     */
+    function premiumBoostReward(
+        address _totemAddr,
+        uint256 _amountToAdd,
+        address _who
+    ) external {
+        if (msg.sender != AddressRegistry(registryAddr).getBoostSystem())
+            revert NotAuthorized();
+
+        _creditMerit(_totemAddr, _amountToAdd, _who, "premiumBoostReward");
+    }
+
+    /**
+     * @notice Awards merit points to a Totem for creating a post
+     * @dev Only callable by the Posts contract
+     * @param _totemAddr Address of the Totem to credit merit to
+     */
+    function postReward(address _totemAddr, address _who) external {
+        if (msg.sender != AddressRegistry(registryAddr).getPosts())
+            revert NotAuthorized();
+
+        uint256 amountToAdd = (postRewardPoints *
+            getCurrentMythumMultiplier()) / 100;
+        _creditMerit(_totemAddr, amountToAdd, _who, "postReward");
+    }
+
+    /**
+     * @notice Awards merit points to a Totem for receiving a donation
+     * @dev Only callable by the Posts contract
+     * @param _totemAddr Address of the Totem to credit merit to
+     * @param _donationAmount Amount of the donation in wei
+     */
+    function donationReward(
+        address _totemAddr,
+        uint256 _donationAmount
+    ) external {
+        if (msg.sender != AddressRegistry(registryAddr).getPosts())
+            revert NotAuthorized();
+
+        // Convert donation amount to merit points by dividing by the divisor
+        uint256 meritPoints = (_donationAmount * getCurrentMythumMultiplier()) /
+            donationMeritDivisor /
+            100;
+
+        if (meritPoints == 0) {
+            emit DonationTooSmallForMerit(
+                _totemAddr,
+                _donationAmount,
+                donationMeritDivisor
+            );
+            return;
+        }
+
+        _creditMerit(_totemAddr, meritPoints, msg.sender, "donationReward");
+
+        emit DonationRewarded(msg.sender, _totemAddr, meritPoints);
+    }
+
     // ADMIN FUNCTIONS
 
     /**
@@ -234,6 +268,20 @@ contract MeritManager is
      */
     function updateState() external onlyRole(MANAGER) {
         _updateState();
+    }
+
+    /**
+     * @notice Sets the start time for the first period (one-time operation)
+     * @param _startTime Timestamp when the first period should begin
+     * @dev Can only be called once by MANAGER role. Start time must be in the future.
+     */
+    function setStartTime(uint256 _startTime) external onlyRole(MANAGER) {
+        if (startTime != 0) revert StartTimeAlreadySet();
+        if (_startTime <= block.timestamp) revert InvalidStartTime();
+
+        startTime = _startTime;
+
+        emit StartTimeSet(_startTime);
     }
 
     /**
@@ -245,22 +293,7 @@ contract MeritManager is
         address _totemAddr,
         uint256 _amount
     ) external onlyRole(MANAGER) {
-        if (_amount == 0) revert ZeroAmount();
-        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
-        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
-
-        uint256 currentPeriod_ = currentPeriod();
-
-        // Apply Mythum multiplier if in Mythum period
-        if (isMythum()) {
-            _amount = (_amount * mythumMultiplier) / 100;
-        }
-
-        // Add merit to the totem
-        totemMerit[currentPeriod_][_totemAddr] += _amount;
-        totalMeritPoints[currentPeriod_] += _amount;
-
-        emit MeritCredited(_totemAddr, _amount, currentPeriod_);
+        _creditMerit(_totemAddr, _amount, msg.sender, "creditMerit");
     }
 
     /**
@@ -287,18 +320,6 @@ contract MeritManager is
     }
 
     /**
-     * @notice Sets the one Totem boost amount
-     * @param _oneTotemBoost New boost amount
-     */
-    function setOneTotemBoost(
-        uint256 _oneTotemBoost
-    ) external onlyRole(MANAGER) {
-        if (_oneTotemBoost == 0) revert ZeroAmount();
-        oneTotemBoost = _oneTotemBoost;
-        emit ParameterUpdated("oneTotemBoost", _oneTotemBoost);
-    }
-
-    /**
      * @notice Sets the Mythum multiplier (in percentage, e.g., 150 = 1.5x)
      * @param _mythumMultiplier New multiplier value
      */
@@ -311,15 +332,6 @@ contract MeritManager is
     }
 
     /**
-     * @notice Sets the boost fee in native tokens
-     * @param _boostFee New boost fee
-     */
-    function setBoostFee(uint256 _boostFee) external onlyRole(MANAGER) {
-        boostFee = _boostFee;
-        emit ParameterUpdated("boostFee", _boostFee);
-    }
-
-    /**
      * @notice Sets the period duration
      * @param _newPeriodDuration New period duration in seconds
      */
@@ -328,12 +340,15 @@ contract MeritManager is
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_newPeriodDuration < 1 days) revert InvalidPeriodDuration();
 
+        // First, process all pending periods with the current period duration
+        _updateState();
+
         // Store the current period count before changing the duration
         accumulatedPeriods = currentPeriod();
         startTime = block.timestamp; // Reset the start time to now
 
         periodDuration = _newPeriodDuration;
-        lastProcessedPeriod = currentPeriod();
+
         emit ParameterUpdated("periodDuration", _newPeriodDuration);
     }
 
@@ -377,6 +392,58 @@ contract MeritManager is
     }
 
     /**
+     * @notice Sets the amount of merit points awarded for creating a post
+     * @param _amount New amount of merit points
+     */
+    function setPostRewardPoints(uint256 _amount) external onlyRole(MANAGER) {
+        postRewardPoints = _amount;
+        emit PostRewardUpdated(_amount);
+    }
+
+    /**
+     * @notice Sets the divisor used to calculate merit points from donation amount
+     * @param _divisor New divisor value (e.g. 1e14 means 0.001 ETH = 10 merit points)
+     */
+    function setDonationMeritDivisor(
+        uint256 _divisor
+    ) external onlyRole(MANAGER) {
+        if (_divisor == 0) revert InvalidDivisor();
+        donationMeritDivisor = _divisor;
+        emit ParameterUpdated("donationMeritDivisor", _divisor);
+    }
+
+    /**
+     * @notice Increases karma points for a totem
+     * @param _totemAddr Address of the totem
+     * @param _amount Amount of karma points to add
+     */
+    function increaseKarma(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+
+        totemKarma[_totemAddr] += _amount;
+        emit KarmaUpdated(_totemAddr, _amount, true);
+    }
+
+    /**
+     * @notice Decreases karma points for a totem
+     * @param _totemAddr Address of the totem
+     * @param _amount Amount of karma points to subtract
+     */
+    function decreaseKarma(
+        address _totemAddr,
+        uint256 _amount
+    ) external onlyRole(MANAGER) {
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+        if (totemKarma[_totemAddr] < _amount) revert InsufficientKarma();
+
+        totemKarma[_totemAddr] -= _amount;
+        emit KarmaUpdated(_totemAddr, _amount, false);
+    }
+
+    /**
      * @dev Throws if the contract is paused or if the ecosystem is paused.
      */
     function _requireNotPaused() internal view virtual override {
@@ -392,10 +459,6 @@ contract MeritManager is
      * @notice Updates the state of the contract by processing pending periods
      */
     function _updateState() private {
-        uint256 yearIdx = getYearIndex();
-
-        VestingWallet wallet = VestingWallet(payable(vestingWallets[yearIdx]));
-
         uint256 _currentPeriod = currentPeriod();
 
         // Only process completed periods, not the current period
@@ -407,15 +470,43 @@ contract MeritManager is
                 period < _currentPeriod;
                 period++
             ) {
+                uint256 yearIdx = period / slices;
                 releasedMytho[period] =
                     vestingWalletsAllocation[yearIdx] /
                     slices;
                 emit MythoReleased(releasedMytho[period], period);
             }
 
-            wallet.release(mythoToken);
+            for (uint256 walletId; walletId < vestingWallets.length; walletId++) {
+                VestingWallet wallet = VestingWallet(payable(vestingWallets[walletId]));
+                if (wallet.releasable(mythoToken) > 0) wallet.release(mythoToken);
+            }
             lastProcessedPeriod = _currentPeriod;
         }
+    }
+
+    /**
+     * @notice Credits merit points to a registered totem
+     * @param _totemAddr Address of the totem to credit
+     * @param _amount Amount of merit points to credit
+     */
+    function _creditMerit(
+        address _totemAddr,
+        uint256 _amount,
+        address _who,
+        string memory _source
+    ) private {
+        if (_amount == 0) revert ZeroAmount();
+        if (!registeredTotems[_totemAddr]) revert TotemNotRegistered();
+        if (hasRole(BLACKLISTED, _totemAddr)) revert TotemInBlacklist();
+
+        uint256 currentPeriod_ = currentPeriod();
+
+        // Add merit to the totem
+        totemMerit[currentPeriod_][_totemAddr] += _amount;
+        totalMeritPoints[currentPeriod_] += _amount;
+
+        emit MeritCredited(_totemAddr, _amount, currentPeriod_, _who, _source);
     }
 
     // VIEW FUNCTIONS
@@ -425,9 +516,61 @@ contract MeritManager is
      * @return Current period number
      */
     function currentPeriod() public view returns (uint256) {
-        if (block.timestamp < startTime) return accumulatedPeriods;
+        if (startTime == 0 || block.timestamp < startTime)
+            return accumulatedPeriods;
         return
             accumulatedPeriods + (block.timestamp - startTime) / periodDuration;
+    }
+
+    /**
+     * @notice Checks if the start time has been initialized
+     * @return Whether the start time has been set by admin
+     */
+    function isStartTimeInitialized() external view returns (bool) {
+        return startTime != 0;
+    }
+
+    /**
+     * @notice Calculates how much merit points a donation would generate
+     * @param _donationAmount Amount of the donation in wei (before fees)
+     * @return meritPoints The amount of merit points that would be awarded
+     */
+    function calculateDonationMerit(
+        uint256 _donationAmount
+    ) external view returns (uint256) {
+        // Get donation fee from Posts contract
+        address postsAddr = AddressRegistry(registryAddr).getPosts();
+        uint256 donationFeePercentage = Posts(postsAddr)
+            .donationFeePercentage();
+
+        // Calculate fee and amount after fee (same logic as in Posts.donateToPost)
+        uint256 fee = (_donationAmount * donationFeePercentage) / 10000;
+        uint256 creatorAmount = _donationAmount - fee;
+
+        return
+            (creatorAmount * getCurrentMythumMultiplier()) /
+            donationMeritDivisor /
+            100;
+    }
+
+    /**
+     * @notice Gets the minimum donation amount required to receive merit points
+     * @return Minimum donation amount in wei (before fees)
+     */
+    function getMinimumDonationForMerit() external view returns (uint256) {
+        // Get donation fee from Posts contract
+        address postsAddr = AddressRegistry(registryAddr).getPosts();
+        uint256 donationFeePercentage = Posts(postsAddr)
+            .donationFeePercentage();
+
+        // Calculate minimum donation amount that after fee deduction will give at least 1 merit point
+        // creatorAmount = donationAmount - fee
+        // creatorAmount = donationAmount - (donationAmount * feePercentage / 10000)
+        // creatorAmount = donationAmount * (10000 - feePercentage) / 10000
+        // For 1 merit point: donationMeritDivisor = donationAmount * (10000 - feePercentage) / 10000
+        // donationAmount = donationMeritDivisor * 10000 / (10000 - feePercentage)
+
+        return (donationMeritDivisor * 10000) / (10000 - donationFeePercentage);
     }
 
     /**
@@ -435,14 +578,20 @@ contract MeritManager is
      * @return Whether current time is in Mythum period
      */
     function isMythum() public view returns (bool) {
+        if (startTime == 0) return false;
         uint256 currentPeriodNumber = currentPeriod();
         uint256 periodsAfterAccumulation = currentPeriodNumber -
             accumulatedPeriods;
         uint256 currentPeriodStart = startTime +
             (periodsAfterAccumulation * periodDuration);
-            
+
         uint256 mythumStart = currentPeriodStart + ((periodDuration * 23) / 30);
         return block.timestamp >= mythumStart;
+    }
+
+    function getCurrentMythumMultiplier() public view returns (uint256) {
+        if (isMythum()) return mythumMultiplier;
+        return 100;
     }
 
     /**
@@ -468,7 +617,10 @@ contract MeritManager is
      * @param _end The ending index (exclusive)
      * @return Array of registered totem addresses within the specified range
      */
-    function getAllRegisteredTotems(uint256 _start, uint256 _end) external view returns (address[] memory) {
+    function getAllRegisteredTotems(
+        uint256 _start,
+        uint256 _end
+    ) external view returns (address[] memory) {
         if (_end > registeredTotemsList.length) {
             _end = registeredTotemsList.length;
         }
@@ -478,11 +630,11 @@ contract MeritManager is
 
         uint256 length = _end - _start;
         address[] memory result = new address[](length);
-        
+
         for (uint256 i = 0; i < length; i++) {
             result[i] = registeredTotemsList[_start + i];
         }
-        
+
         return result;
     }
 
@@ -606,31 +758,5 @@ contract MeritManager is
         uint256 _periodNum
     ) external view returns (uint256) {
         return totemMerit[_periodNum][_totemAddr];
-    }
-
-    /**
-     * @notice Gets whether a user has boosted in a specific period
-     * @param _user User address to check
-     * @param _periodNum Period number to check
-     * @return Whether the user has boosted in the specified period
-     */
-    function hasUserBoostedInPeriod(
-        address _user,
-        uint256 _periodNum
-    ) external view returns (bool) {
-        return userBoostedInPeriod[_periodNum][_user];
-    }
-
-    /**
-     * @notice Gets which totem a user boosted in a specific period
-     * @param _user User address to check
-     * @param _periodNum Period number to check
-     * @return Address of the totem the user boosted
-     */
-    function getUserBoostedTotem(
-        address _user,
-        uint256 _periodNum
-    ) external view returns (address) {
-        return userBoostedTotem[_periodNum][_user];
     }
 }

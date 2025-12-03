@@ -16,6 +16,8 @@ docs/
 
 flattened/
 
+.kiro/
+
 promptDesc.txt
 promptCode.txt
 combined/CombinedContracts.sol

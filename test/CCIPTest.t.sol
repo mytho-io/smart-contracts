@@ -94,7 +94,7 @@ contract CCIPTest is Test {
             ""
         );
         mythoDestination = BurnMintMYTHO(address(mythoDestinationProxy));
-        mythoDestination.initialize();
+        mythoDestination.initialize(address(registry));
 
         // Create token pools for CCIP
         address[] memory emptyAllowlist = new address[](0);

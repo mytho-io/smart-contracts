@@ -17,6 +17,7 @@ import {MYTHO} from "../src/MYTHO.sol";
 import {Treasury} from "../src/Treasury.sol";
 import {AddressRegistry} from "../src/AddressRegistry.sol";
 import {MockToken} from "../test/mocks/MockToken.sol";
+import {Posts} from "../src/Posts.sol";
 
 import {IUniswapV2Factory} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import {IUniswapV2Pair} from "@uniswap-v2-core/contracts/interfaces/IUniswapV2Pair.sol";
@@ -24,6 +25,10 @@ import {IUniswapV2Router02} from "lib/v2-periphery/contracts/interfaces/IUniswap
 import {WETH} from "lib/solmate/src/tokens/WETH.sol";
 
 import {Deployer} from "test/util/Deployer.sol";
+
+interface ILayers {
+    function boostLayer(uint256 layerId, uint256 boostAmount) external;
+}
 
 /**
  * @dev Minato deployment
@@ -59,6 +64,8 @@ contract Do is Script {
     IUniswapV2Router02 uniRouter;
     WETH weth;
 
+    Posts posts;
+
     uint256 minato;
 
     uint256 deployerPk = vm.envUint("PRIVATE_KEY");
@@ -79,21 +86,26 @@ contract Do is Script {
         beacon = UpgradeableBeacon(0x8c0e0cEbec78D9Fb0264e557C52045E1Af6d53Ec);
         factory = TF(0xF0a09aC7a2242977566c8F8dF4F944ed7D333047);
         mm = MM(0x622A3667AA0A879EEB63011c63B6395feBe38880);
-        distr = TTD(0x652F0E0F01F5a9376cA1a8704c3F849861242C91);
+        distr = TTD(payable(0x652F0E0F01F5a9376cA1a8704c3F849861242C91));
         treasury = Treasury(payable(0x62470fbE6768C723678886ddD574B818a4aba59e));
         registry = AddressRegistry(0x8c41642801687A4F2f6C31aB40b3Ab74c3809e5E);
         mytho = MYTHO(0x8651355f756075f26cc9568114fFe87B3Faffd4a);
+        posts = Posts(0xB1d122d1329dbF9a125cDf978a0b6190C93f7FFB);
 
         astrToken = 0x26e6f7c7047252DdE3dcBF26AA492e6a264Db655;
     }
 
     function run() public {
         fork(minato);
+        address developer = 0x29367D8F3E349E97aD2221242208dF92CF4E2186;
 
-        console.log("merit vesting 1:", mytho.meritVestingYear1());
-        console.log("merit vesting 2:", mytho.meritVestingYear2());
-        console.log("merit vesting 3:", mytho.meritVestingYear3());
-        console.log("merit vesting 4:", mytho.meritVestingYear4());
+        ILayers layers = ILayers(address(posts));
+
+        IERC20 archToken = IERC20(0x5A501b94F73f7a6fEe391e9E907Be326D544f643);
+        // archToken.approve(address(posts), 123e18);
+
+        archToken.transfer(0x27131f76F99b608c084C01775b8401242bF27E8A, 1e18);
+        // layers.boostLayer(213, 123e18);
     }
 
     function fork(uint256 _forkId) internal {
