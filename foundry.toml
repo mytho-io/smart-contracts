@@ -1,8 +1,11 @@
 [profile.default]
 # evm_version = "london"
+# solc_version = "0.8.28"
 src = "src"
 out = "out"
 libs = ["lib"]
+optimizer = true
+optimizer_runs = 100
 fs_permissions = [
     { access = "read", path = "./src" },
     { access = "read-write", path = "./combined" },
