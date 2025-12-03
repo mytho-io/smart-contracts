@@ -35,11 +35,11 @@ contract MythoTest is Test {
     address manager;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens with 18 decimals
-    uint256 public constant MERIT_YEAR_1 = 8_000_000 * 10 ** 18; // 40% of 20M
-    uint256 public constant MERIT_YEAR_2 = 6_000_000 * 10 ** 18; // 30% of 20M
-    uint256 public constant MERIT_YEAR_3 = 4_000_000 * 10 ** 18; // 20% of 20M
-    uint256 public constant MERIT_YEAR_4 = 2_000_000 * 10 ** 18; // 10% of 20M
-    uint256 public constant MERIT_TOTAL = MERIT_YEAR_1 + MERIT_YEAR_2 + MERIT_YEAR_3 + MERIT_YEAR_4; // 20M total
+    uint256 public constant MERIT_YEAR_1 = 40_000_000 * 10 ** 18; // 40% of 100M
+    uint256 public constant MERIT_YEAR_2 = 30_000_000 * 10 ** 18; // 30% of 100M
+    uint256 public constant MERIT_YEAR_3 = 20_000_000 * 10 ** 18; // 20% of 100M
+    uint256 public constant MERIT_YEAR_4 = 10_000_000 * 10 ** 18; // 10% of 100M
+    uint256 public constant MERIT_TOTAL = MERIT_YEAR_1 + MERIT_YEAR_2 + MERIT_YEAR_3 + MERIT_YEAR_4; // 100M total
 
     function setUp() public {
         deployer = makeAddr("deployer");

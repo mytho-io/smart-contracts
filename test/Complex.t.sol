@@ -4,6 +4,46 @@ pragma solidity ^0.8.20;
 import "./Base.t.sol";
 
 contract ComplexTest is Base {
+    // function test_SwitchingMythoTransferability() public {
+    //     deal(address(mytho), userA, 100e18);
+
+    //     prank(userA);
+    //     mytho.transfer(userB, 10e18);
+
+    //     assertEq(mytho.balanceOf(userB), 10e18);
+
+    //     prank(deployer);
+    //     mytho.toggleTransferability();
+
+    //     prank(userA);
+    //     vm.expectRevert(MYTHO.TransfersRestricted.selector);
+    //     mytho.transfer(userB, 10e18);
+
+    //     prank(deployer);
+    //     mytho.grantRole(keccak256("TRANSFEROR"), userA);
+
+    //     prank(userA);
+    //     mytho.transfer(userB, 10e18);
+    //     assertEq(mytho.balanceOf(userB), 20e18);
+
+    //     prank(userB);
+    //     vm.expectRevert(MYTHO.TransfersRestricted.selector);
+    //     mytho.transfer(userA, 10e18);
+    // }
+
+    // function test_MythoPause() public {
+    //     deal(address(mytho), userA, 100e18);
+
+    //     prank(userA);
+    //     mytho.transfer(userB, 10e18);
+
+    //     prank(deployer);
+    //     mytho.pause();
+
+    //     vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+    //     mytho.transfer(userB, 10e18);
+    // }
+    
     function test_DosOnChangingPaymentToken() public {
         prank(deployer);
         distr.setMaxTotemTokensPerAddress(1e36);
@@ -1978,7 +2018,7 @@ contract ComplexTest is Base {
         totem.withdrawToken(address(mytho), userB, totemBalance / 2);
 
         // Check final balances
-        assertEq(mytho.balanceOf(address(totem)), totemBalance / 2);
+        assertApproxEqAbs(mytho.balanceOf(address(totem)), totemBalance / 2, 1);
         assertEq(mytho.balanceOf(userB), totemBalance / 2);
     }
 

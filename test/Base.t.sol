@@ -378,10 +378,10 @@ contract Base is Test {
         registry.setAddress(bytes32("WBNB"), address(weth));
 
         uint256[4] memory vestingAllocations;
-        vestingAllocations[0] = 8_000_000 ether;
-        vestingAllocations[1] = 6_000_000 ether;
-        vestingAllocations[2] = 4_000_000 ether;
-        vestingAllocations[3] = 2_000_000 ether;
+        vestingAllocations[0] = 40_000_000 ether;
+        vestingAllocations[1] = 30_000_000 ether;
+        vestingAllocations[2] = 20_000_000 ether;
+        vestingAllocations[3] = 10_000_000 ether;
         
         mm.initialize(address(registry), vestingAddresses, vestingAllocations);
 
@@ -504,5 +504,8 @@ contract Base is Test {
         mockV3Aggregator = new MockV3Aggregator(8, 0.05e8);
 
         distr.setPriceFeed(address(paymentToken), address(mockV3Aggregator));
+
+        mytho.toggleTransferability();
+        mytho.grantRole(mytho.TRANSFEROR(), address(mm));
     }
 }
