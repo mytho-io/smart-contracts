@@ -248,12 +248,12 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         (
             ,
             uint256 paymentTokenBalance,
-            uint256 lpBalance,
+            ,
             uint256 mythoBalance
         ) = getAllBalances();
 
         // Check if all balances are zero
-        if (paymentTokenBalance == 0 && mythoBalance == 0 && lpBalance == 0) {
+        if (paymentTokenBalance == 0 && mythoBalance == 0) {
             revert NothingToDistribute();
         }
 
@@ -261,7 +261,6 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         uint256 paymentAmount = (paymentTokenBalance * _tokenAmount) /
             circulatingSupply;
         uint256 mythoAmount = (mythoBalance * _tokenAmount) / circulatingSupply;
-        uint256 lpAmount = (lpBalance * _tokenAmount) / circulatingSupply;
 
         // Burn or transfer tokens based on token type
         if (isCustomToken()) {
@@ -292,17 +291,12 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
             mythoToken.safeTransfer(msg.sender, mythoAmount);
         }
 
-        // Transfer LP tokens if there are any
-        if (lpAmount > 0) {
-            liquidityToken.safeTransfer(msg.sender, lpAmount);
-        }
-
         emit TotemTokenRedeemed(
             msg.sender,
             _tokenAmount,
             paymentAmount,
             mythoAmount,
-            lpAmount
+            0
         );
     }
 
@@ -545,7 +539,7 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         (
             ,
             uint256 paymentTokenBalance,
-            uint256 lpBalance,
+            ,
             uint256 mythoBalance
         ) = getAllBalances();
         
@@ -565,13 +559,12 @@ contract Totem is AccessControlUpgradeable, ReentrancyGuardUpgradeable {
         // Calculate user share for each token type based on circulating supply
         paymentAmount = (paymentTokenBalance * effectiveAmount) / circulatingSupply;
         mythoAmount = (mythoBalance * effectiveAmount) / circulatingSupply;
-        lpAmount = (lpBalance * effectiveAmount) / circulatingSupply;
 
         if (tokenType == TokenType.ERC721) {
             paymentAmount = 0;
             lpAmount = 0;
         }
         
-        return (paymentAmount, mythoAmount, lpAmount);
+        return (paymentAmount, mythoAmount, 0);
     }
 }
