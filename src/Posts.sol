@@ -75,6 +75,7 @@ contract Posts is
     // New storage variables added for upgrade - must be at the end
     mapping(address => mapping(address => uint256))
         public userPendingPostByTotem; // Maps user address => totem address => pending post ID (0 if none)
+    mapping(address => mapping(address => uint256)) public userBoosts; // Maps user address => totem address => total active boost amount
 
     // Structs
     struct Post {
@@ -358,6 +359,7 @@ contract Posts is
             boosts[_postId][msg.sender] += 1; // Each NFT counts as 1 boost
             nftBoosts[_postId][msg.sender].push(tokenId);
             post.totalBoostedTokens += 1;
+            userBoosts[msg.sender][post.totemAddr] += 1;
 
             emit PostBoostedNFT(_postId, msg.sender, tokenId);
         } else {
@@ -377,6 +379,7 @@ contract Posts is
             // Update boost data
             boosts[_postId][msg.sender] += _tokenAmountOrId;
             post.totalBoostedTokens += _tokenAmountOrId;
+            userBoosts[msg.sender][post.totemAddr] += _tokenAmountOrId;
 
             emit PostBoostedERC20(_postId, msg.sender, _tokenAmountOrId);
         }
@@ -644,6 +647,7 @@ contract Posts is
 
         // Clear user's boost amount to mark it as unboosted
         delete boosts[_postId][_user];
+        userBoosts[_user][post.totemAddr] -= boostAmount;
         emit PostUnboosted(_postId, _user, shardReward);
     }
 
@@ -792,6 +796,19 @@ contract Posts is
         address _totemAddr
     ) external view returns (uint256) {
         return userPendingPostByTotem[_user][_totemAddr];
+    }
+
+    /**
+     * @notice Check if a user has active boosts in a specific totem
+     * @param _totemAddr The totem address
+     * @param _userAddr The user address
+     * @return True if user has active boosts in the totem, false otherwise
+     */
+    function isBooster(
+        address _totemAddr,
+        address _userAddr
+    ) external view returns (bool) {
+        return userBoosts[_userAddr][_totemAddr] > 0;
     }
 
     // OVERRIDES
